@@ -1,18 +1,24 @@
--- Aimbot (Silent Aim) + WindUI controls
--- Minimal: UI + Silent Aim only (ยิงทะลุผนังแล้ว)
-
+-- =========================
 -- Services
+-- =========================
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 
--- Basic refs
+-- =========================
+-- Local Player & Camera
+-- =========================
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
+local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
--- WindUI (same loader as original; if unavailable uses simple fallback)
+-- =========================
+-- WindUI
+-- =========================
 local WindUI = nil
 pcall(function()
     local Version = "1.6.53"
@@ -22,87 +28,80 @@ end)
 local Window
 if WindUI then
     Window = WindUI:CreateWindow({
-        Title = "MOKUN NEXUS - Aimbot",
+        Title = "MOKUN NEXUS 🔫 | Silent Aim",
         Icon = "crosshair",
-        Author = "auto",
-        Folder = "MOKUN_NEXUS_AIM",
-        Size = UDim2.fromOffset(400, 220),
+        Author = "UI Integration",
+        Folder = "MOKUN_AIMBOT",
+        Size = UDim2.fromOffset(400, 200),
         Theme = "Dark",
         Transparent = true,
         Resizable = true,
         KeyCode = Enum.KeyCode.G
     })
 else
-    -- minimal fallback so later code can call Window:Tab
     Window = {
-        Tab = function() return {
-            Section = function() end,
-            Toggle = function() return { Set = function() end } end,
-            Slider = function() return { Set = function() end } end,
-            Button = function() end,
-            Input = function() return {} end,
-            Divider = function() end
-        } end
+        Tab = function(_)
+            return {
+                Section = function() end,
+                Toggle = function() return { Set = function() end } end,
+                Slider = function() return { Set = function() end } end
+            }
+        end
     }
 end
 
 local ConfigManager = Window.ConfigManager
-local myConfig = ConfigManager and ConfigManager:CreateConfig and ConfigManager:CreateConfig("AimbotConfig") or { Register = function() end }
+local myConfig = ConfigManager and ConfigManager:CreateConfig and ConfigManager:CreateConfig("SilentAimConfig") or {Register=function()end}
 
--- Aimbot settings
+-- =========================
+-- Silent Aim Core
+-- =========================
 local SilentAimEnabled = false
-local SilentAimAttachEnabled = false
+local WallCheckEnabled = true
 local FOVRadius = 120
 local CurrentTarget = nil
 
--- Drawing objects for FOV + Tracer
-local SilentFOVCircle = nil
-local Tracer = nil
-pcall(function()
-    if Drawing then
-        SilentFOVCircle = Drawing.new("Circle")
-        SilentFOVCircle.Color = Color3.fromRGB(255, 255, 255)
-        SilentFOVCircle.Thickness = 2
-        SilentFOVCircle.NumSides = 64
-        SilentFOVCircle.Filled = false
-        SilentFOVCircle.Transparency = 0.8
-        SilentFOVCircle.Radius = FOVRadius
-        SilentFOVCircle.Visible = false
+-- FOV Circle
+local SilentFOVCircle = Drawing.new("Circle")
+SilentFOVCircle.Color = Color3.fromRGB(255, 255, 255)
+SilentFOVCircle.Thickness = 2
+SilentFOVCircle.NumSides = 64
+SilentFOVCircle.Filled = false
+SilentFOVCircle.Transparency = 0.8
+SilentFOVCircle.Radius = FOVRadius
+SilentFOVCircle.Visible = false
 
-        Tracer = Drawing.new("Line")
-        Tracer.Thickness = 1
-        Tracer.Color = Color3.fromRGB(255, 50, 50)
-        Tracer.Transparency = 1
-        Tracer.Visible = false
-    end
-end)
+-- Tracer
+local Tracer = Drawing.new("Line")
+Tracer.Thickness = 1
+Tracer.Color = Color3.fromRGB(255, 50, 50)
+Tracer.Transparency = 1
+Tracer.Visible = false
 
--- Utility
+-- Target Circle (วงกลมรอบหัวเป้าหมาย)
+local TargetCircle = Drawing.new("Circle")
+TargetCircle.Color = Color3.fromRGB(0, 255, 0)
+TargetCircle.Thickness = 2
+TargetCircle.NumSides = 64
+TargetCircle.Filled = false
+TargetCircle.Transparency = 1
+TargetCircle.Radius = 15
+TargetCircle.Visible = false
+
+-- Utils
 local function getPing()
-    local ok, stats = pcall(function()
-        return LocalPlayer:FindFirstChild("PlayerGui") and LocalPlayer.PlayerGui:FindFirstChild("NetworkStats")
-    end)
-    if ok and stats then
-        local pingLabel = stats:FindFirstChild("PingLabel")
-        if pingLabel and typeof(pingLabel.Text) == "string" then
-            local n = tonumber(pingLabel.Text:match("%d+"))
-            if n then return n / 1000 end
-        end
-    end
     return 0.20
 end
 
 local function predictPosition(head, hrp)
     local ping = getPing()
     local vel = hrp and hrp.Velocity or Vector3.zero
-    return head.Position + (vel * math.clamp(ping * 1.15, 0, 1.5))
+    return head.Position + (vel * ping * 1.15)
 end
 
--- (ฟังก์ชัน isBehindWall ยังเก็บไว้แต่ตอนนี้ไม่ได้ใช้สำหรับบล็อกการยิง)
 local function isBehindWall(startPos, endPos)
     if not startPos or not endPos then return false end
-    local dir = endPos - startPos
-    local ray = Ray.new(startPos, dir.Unit * math.min(dir.Magnitude, 1000))
+    local ray = Ray.new(startPos, endPos - startPos)
     local ignoreList = {}
     if LocalPlayer.Character then table.insert(ignoreList, LocalPlayer.Character) end
     if CurrentTarget and CurrentTarget.Character then table.insert(ignoreList, CurrentTarget.Character) end
@@ -111,21 +110,19 @@ local function isBehindWall(startPos, endPos)
 end
 
 local function getClosestTarget()
-    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    local best = nil
-    local bestMag = FOVRadius
-    for _, p in ipairs(Players:GetPlayers()) do
+    local best, bestDist = nil, FOVRadius
+    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    for _,p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character then
             local head = p.Character:FindFirstChild("Head")
             local hum = p.Character:FindFirstChild("Humanoid")
             local hrp = p.Character:FindFirstChild("HumanoidRootPart")
             if head and hum and hum.Health > 0 and hrp then
-                local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+                local screenPos,onScreen = Camera:WorldToViewportPoint(head.Position)
                 if onScreen then
-                    local sv = Vector2.new(screenPos.X, screenPos.Y)
-                    local mag = (sv - center).Magnitude
-                    if mag <= FOVRadius and mag < bestMag then
-                        bestMag = mag
+                    local dist = (Vector2.new(screenPos.X,screenPos.Y)-center).Magnitude
+                    if dist <= FOVRadius and dist < bestDist then
+                        bestDist = dist
                         best = p
                     end
                 end
@@ -135,135 +132,122 @@ local function getClosestTarget()
     return best
 end
 
--- Remote hook (single)
-local successRemote, RemotesFolder = pcall(function() return ReplicatedStorage:WaitForChild("Remotes", 5) end)
-local SendRemote = successRemote and RemotesFolder and RemotesFolder:FindFirstChild("Send")
+-- Detect if gun is shotgun
+local function isShotgun(toolName)
+    toolName = toolName:lower()
+    return toolName:find("shotgun") or toolName:find("pump") or toolName:find("sg")
+end
 
-local oldFire = nil
-if SendRemote and SendRemote.FireServer then
-    local ok, hf = pcall(function()
-        return hookfunction(SendRemote.FireServer, function(self, ...)
-            if self ~= SendRemote then return hf(self, ...) end
-            local args = {...}
-            -- args[2] == "shoot_gun" per original logic
-            if SilentAimEnabled and args[2] == "shoot_gun" then
-                CurrentTarget = getClosestTarget()
-                if CurrentTarget and CurrentTarget.Character then
-                    local head = CurrentTarget.Character:FindFirstChild("Head")
-                    local hrp = CurrentTarget.Character:FindFirstChild("HumanoidRootPart")
-                    local hum = CurrentTarget.Character:FindFirstChild("Humanoid")
-                    local myHead = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Head")
-                    if head and hrp and hum and hum.Health > 0 and myHead then
-                        local aimPos = predictPosition(head, hrp)
-                        local myPos = myHead.Position
+-- Remote hook
+local Remote = Remotes:FindFirstChild("Send")
+if Remote and Remote.FireServer then
+    local oldFire
+    oldFire = hookfunction(Remote.FireServer, function(self,...)
+        local args = {...}
+        if SilentAimEnabled and args[2]=="shoot_gun" then
+            CurrentTarget = getClosestTarget()
+            if CurrentTarget and CurrentTarget.Character then
+                local head = CurrentTarget.Character:FindFirstChild("Head")
+                local hrp = CurrentTarget.Character:FindFirstChild("HumanoidRootPart")
+                local hum = CurrentTarget.Character:FindFirstChild("Humanoid")
+                local myHead = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Head")
+                local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("Tool")
 
-                        -- **แก้ตรงนี้: ยิงทะลุผนัง**
-                        -- เดิมถ้าติดผนังจะตั้งเป็น miss (math.huge). ตอนนี้เราตั้งให้เล็งหัวเสมอ (ทะลุ)
-                        args[4] = CFrame.new(myPos, aimPos)
-                        -- payload: single-hit to head
-                        args[5] = {
-                            {
-                                Instance = head,
-                                Normal = Vector3.new(0, 1, 0),
-                                Position = aimPos
-                            }
-                        }
+                if head and hrp and hum and hum.Health>0 and myHead then
+                    local aimPos = predictPosition(head, hrp)
+                    local myPos = myHead.Position
+                    local blocked = WallCheckEnabled and isBehindWall(myPos, aimPos)
+
+                    if blocked then
+                        if tool and isShotgun(tool.Name) then
+                            args[4] = CFrame.new(math.huge, math.huge, math.huge) -- ซองติดกำแพง ยิงว่าง
+                        else
+                            args[4] = CFrame.new(myPos, aimPos) -- ปืนอื่น ยิงทะลุ
+                            args[5] = {{
+                                Instance=head,
+                                Normal=Vector3.new(0,1,0),
+                                Position=aimPos
+                            }}
+                        end
+                    else
+                        args[4] = CFrame.new(myPos, aimPos) -- ยิงตรงหัว
+                        args[5] = {{
+                            Instance=head,
+                            Normal=Vector3.new(0,1,0),
+                            Position=aimPos
+                        }}
                     end
                 end
             end
-            return hf(self, unpack(args))
-        end)
+        end
+        return oldFire(self, unpack(args))
     end)
-    if ok then
-        oldFire = hf
-    else
-        warn("Failed to hook Send Remote")
-    end
 end
 
--- UI (use WindUI from earlier script)
-local Tab = Window:Tab({Title = "AIMBOT", Icon = "crosshair"})
-Tab:Section({Title = "AIMBOT:"})
+-- =========================
+-- UI Tabs
+-- =========================
+local Tab = Window:Tab({Title="AIMBOT", Icon="crosshair"})
+Tab:Section({Title="Silent Aim"})
 
-local SilentToggle = Tab:Toggle({
+local Toggle = Tab:Toggle({
     Title = "Silent Aim",
     Default = SilentAimEnabled,
     Callback = function(state)
         SilentAimEnabled = state
-        if SilentFOVCircle then SilentFOVCircle.Visible = state end
+        SilentFOVCircle.Visible = state
     end
 })
-if myConfig and myConfig.Register then myConfig:Register("SilentAim", SilentToggle) end
+myConfig:Register("SilentAim", Toggle)
 
-local AttachToggle = Tab:Toggle({
-    Title = "Silent Aim (Attach)",
-    Default = SilentAimAttachEnabled,
+local WallToggle = Tab:Toggle({
+    Title = "Wall Check",
+    Default = WallCheckEnabled,
     Callback = function(state)
-        SilentAimAttachEnabled = state
-        if state then SilentAimEnabled = false SilentToggle:Set(false) end
+        WallCheckEnabled = state
     end
 })
-if myConfig and myConfig.Register then myConfig:Register("SilentAimAttach", AttachToggle) end
+myConfig:Register("WallCheck", WallToggle)
 
 local FOVSlider = Tab:Slider({
     Title = "FOV",
     Step = 1,
-    Value = { Min = 20, Max = 750, Default = FOVRadius },
-    Callback = function(value)
-        FOVRadius = tonumber(value) or FOVRadius
-        if SilentFOVCircle then SilentFOVCircle.Radius = FOVRadius end
+    Value = {Min=20, Max=750, Default=FOVRadius},
+    Callback = function(val)
+        FOVRadius = val
+        SilentFOVCircle.Radius = val
     end
 })
-if myConfig and myConfig.Register then myConfig:Register("FOVRadius", FOVSlider) end
+myConfig:Register("FOVRadius", FOVSlider)
 
--- Update loop: draw FOV circle + tracer, update CurrentTarget when attach enabled
+-- =========================
+-- Render Loop
+-- =========================
 RunService.RenderStepped:Connect(function()
-    local centerScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    -- handle attach mode: keep target updated
-    if SilentAimAttachEnabled then
-        CurrentTarget = getClosestTarget()
-    end
+    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    SilentFOVCircle.Position = center
 
-    -- Drawing FOV circle in screen center
-    if SilentFOVCircle then
-        SilentFOVCircle.Visible = SilentAimEnabled or SilentAimAttachEnabled
-        SilentFOVCircle.Position = centerScreen
-        SilentFOVCircle.Radius = FOVRadius
-    end
-
-    -- Tracer: from center to target head on screen
-    if Tracer then
-        if CurrentTarget and CurrentTarget.Character and CurrentTarget.Character:FindFirstChild("Head") then
-            local headPos = CurrentTarget.Character.Head.Position
-            local screenPos, onScreen = Camera:WorldToViewportPoint(headPos)
-            if onScreen then
-                Tracer.Visible = true
-                Tracer.From = centerScreen
-                Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
-            else
-                Tracer.Visible = false
-            end
+    if CurrentTarget and CurrentTarget.Character and CurrentTarget.Character:FindFirstChild("Head") then
+        local head = CurrentTarget.Character.Head
+        local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
+        if onScreen then
+            -- Tracer
+            Tracer.Visible = true
+            Tracer.From = center
+            Tracer.To = Vector2.new(pos.X,pos.Y)
+            -- Target circle
+            TargetCircle.Visible = true
+            TargetCircle.Position = Vector2.new(pos.X,pos.Y)
         else
             Tracer.Visible = false
+            TargetCircle.Visible = false
         end
+    else
+        Tracer.Visible = false
+        TargetCircle.Visible = false
     end
-end)
 
--- keep CurrentTarget updated per frame if normal SilentAim (non-attach) enabled
-RunService.RenderStepped:Connect(function()
-    if SilentAimEnabled and not SilentAimAttachEnabled then
+    if SilentAimEnabled then
         CurrentTarget = getClosestTarget()
-    end
-end)
-
--- keybind: toggle UI with G (if WindUI supports it)
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.KeyCode == Enum.KeyCode.G and WindUI and Window then
-        if Window.Toggle then
-            Window:Toggle()
-        elseif Window.SetVisible then
-            Window:SetVisible(not Window.Visible)
-        end
     end
 end)
