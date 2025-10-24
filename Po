@@ -1,13 +1,11 @@
---// 💰 ระบบโยกเงิน + กันตาย (Fluent UI) + Rejoin by สคริป (ปรับระบบเดินใหม่ Tween + Vault)
+--// 💰 ระบบโยกเงิน + กันตาย (Fluent UI) + Rejoin by สคริป (ปรับระบบเดินใหม่ Step-Walk)
 
 -- ====== Services ======
 local Players = game:GetService("Players")
-local PathfindingService = game:GetService("PathfindingService")
 local RunService = game:GetService("RunService")
 local TeleportService = game:GetService("TeleportService")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -30,10 +28,10 @@ local Window = Fluent:CreateWindow({
 })
 
 -- ====== Variables ======
-local amount = 1 -- เริ่มต้นขั้นต่ำ 1
-local walkSpeed = 25
+local amount = 1
 local autoWithdraw = false
 local antiDeathEnabled = false
+local walkSpeed = 25
 
 -- ====== Anti-Death Config ======
 local HP_THRESHOLD = 30
@@ -41,71 +39,47 @@ local EVADE_TELEPORT_Y = -30
 local DEBOUNCE_TIME = 0.3
 local lastEvadeTime = 0
 
--- ====== Tween + Pathfinding + Vault ระบบเดิน ======
-local activeTween
-local isWalking = false
-local WALK_SPEED = walkSpeed
-local VAULT_HEIGHT = 10
-local VAULT_TIME = 0.4
+-- ====== ระบบเดิน Step-Walk ======
+local activeWalk = true
 
-local function vaultOver(obstaclePos)
-    local upPos = Vector3.new(obstaclePos.X, obstaclePos.Y + VAULT_HEIGHT, obstaclePos.Z)
-    local tweenUp = TweenService:Create(hrp, TweenInfo.new(VAULT_TIME, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {CFrame = CFrame.new(upPos)})
-    tweenUp:Play()
-    tweenUp.Completed:Wait()
+local function tweenTo(pos)
+    local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local root = character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character:FindFirstChildWhichIsA("Humanoid")
 
-    local downTween = TweenService:Create(hrp, TweenInfo.new(VAULT_TIME, Enum.EasingStyle.Sine, Enum.EasingDirection.In), {CFrame = CFrame.new(obstaclePos)})
-    downTween:Play()
-    downTween.Completed:Wait()
-end
+    if not root or not humanoid or humanoid.Health <= 0 then return end
 
-local function moveToPosition(pos)
-    if activeTween then activeTween:Cancel() end
-    local dist = (hrp.Position - pos).Magnitude
-    local t = dist / WALK_SPEED
-    local tween = TweenService:Create(hrp, TweenInfo.new(t, Enum.EasingStyle.Linear), {CFrame = CFrame.new(pos)})
-    activeTween = tween
-    tween:Play()
-    local ok, _ = pcall(function()
-        tween.Completed:Wait()
-    end)
-end
+    local target = Vector3.new(pos.X, root.Position.Y, pos.Z)
+    local stepDist = 2.5 + (math.random() * 0.3 - 0.15)
+    local dist = (target - root.Position).Magnitude
 
-local function followPath(path)
-    local waypoints = path:GetWaypoints()
-    for _, wp in ipairs(waypoints) do
-        if not isWalking then break end
-        if wp.Action == Enum.PathWaypointAction.Jump then
-            vaultOver(wp.Position)
-        else
-            moveToPosition(wp.Position)
-        end
+    while dist > stepDist and activeWalk do
+        if not root or not humanoid or humanoid.Health <= 0 then return end
+        local from = root.Position
+        local dir = (target - from).Unit
+        local nextPos = from + dir * stepDist
+
+        pcall(function()
+            root.CFrame = CFrame.new(
+                Vector3.new(nextPos.X, root.Position.Y, nextPos.Z),
+                nextPos + dir
+            )
+        end)
+
+        task.wait(0.1 + math.random() * 0.02)
+        dist = (target - root.Position).Magnitude
+    end
+
+    if dist <= stepDist and activeWalk then
+        root.CFrame = CFrame.new(target, target + Vector3.new(0, 0, -1))
+    end
+
+    if humanoid.Sit then
+        humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
     end
 end
 
-function smartWalkTo(targetPos, speed)
-    if isWalking then return end
-    isWalking = true
-    WALK_SPEED = speed or WALK_SPEED
-
-    local path = PathfindingService:CreatePath({
-        AgentRadius = 2,
-        AgentHeight = 5,
-        AgentCanJump = true,
-        WaypointSpacing = 4
-    })
-    path:ComputeAsync(hrp.Position, targetPos)
-
-    if path.Status == Enum.PathStatus.Success then
-        followPath(path)
-    else
-        warn("❌ Pathfinding ล้มเหลว:", targetPos)
-    end
-
-    isWalking = false
-end
-
--- ====== ฟังก์ชัน Anti-Death ======
+-- ====== Anti-Death ======
 local function doEvade()
     if not hrp or not hrp.Parent then return end
     if tick() - lastEvadeTime < DEBOUNCE_TIME then return end
@@ -144,41 +118,40 @@ Tabs.Main:AddInput("AmountInput",{
 })
 
 Tabs.Main:AddToggle("AutoWithdrawToggle",{Title="ถอนเงินอัตโนมัติ",Default=false,Callback=function(v) autoWithdraw=v end})
-Tabs.Main:AddToggle("AntiDeathToggle",{Title="กันตายอัตโนมัติ",Default=false,Callback=function(v)
-    antiDeathEnabled = v
-end})
+Tabs.Main:AddToggle("AntiDeathToggle",{Title="กันตายอัตโนมัติ",Default=false,Callback=function(v) antiDeathEnabled = v end})
 
 Tabs.Main:AddButton({
     Title="▶ เริ่มระบบอัตโนมัติ",
     Description="เดินไปถอนเงิน → ถอน → เดินไปจุดใหม่ → วาปตามลำดับ",
     Callback=function()
         task.spawn(function()
-            hum.WalkSpeed = walkSpeed
             if antiDeathEnabled then
-                Fluent:Notify({Title="กันตาย",Content="เปิดระบบกันตายชั่วคราว ✅",Duration=2})
+                Fluent:Notify({Title="กันตาย",Content="เปิดระบบกันตาย ✅",Duration=2})
             end
 
             if autoWithdraw and amount >= 1 then
-                -- ===== จุดถอนเงิน =====
+                -- เดินไปถอนเงิน
                 local withdrawPos = Vector3.new(834.0,254.7,-162.1)
+                activeWalk = true
                 Fluent:Notify({Title="ถอนเงิน",Content="เดินไปยังจุดถอนเงิน...",Duration=3})
-                smartWalkTo(withdrawPos, walkSpeed)
+                tweenTo(withdrawPos)
                 task.wait(1)
 
-                -- ===== ถอนเงิน =====
+                -- ถอนเงิน
                 local args = {8,"transfer_funds","bank","hand",amount}
                 pcall(function()
                     ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Get"):InvokeServer(unpack(args))
                 end)
                 Fluent:Notify({Title="ถอนเงิน",Content="ถอนเงินสำเร็จ: "..amount.." ✅",Duration=3})
 
-                -- ===== เดินไปจุดก่อนวาป =====
+                -- เดินไปจุดเตรียมวาป
                 local firstPos = Vector3.new(920.4, 254.7, -150.4)
+                activeWalk = true
                 Fluent:Notify({Title="กำลังเดิน",Content="ไปจุดเตรียมวาป...",Duration=2})
-                smartWalkTo(firstPos, walkSpeed)
+                tweenTo(firstPos)
                 task.wait(0.5)
 
-                -- ===== วาปออโต้ตามจุด =====
+                -- วาปออโต้
                 local teleportPoints = {
                     Vector3.new(914.8, 254.7, -150.3),
                     Vector3.new(914.1, 254.7, -149.3),
@@ -194,7 +167,7 @@ Tabs.Main:AddButton({
                     task.wait(0.2)
                 end
 
-                Fluent:Notify({Title="วาปสำเร็จ",Content="วาปครบทุกจุดเรียบร้อย ✅",Duration=3})
+                Fluent:Notify({Title="วาปสำเร็จ",Content="วาปครบทุกจุด ✅",Duration=3})
             end
         end)
     end
@@ -205,10 +178,7 @@ Tabs.Main:AddButton({
     Title="⏹ หยุดเดิน",
     Description="ยกเลิกการเดินทันที",
     Callback=function()
-        isWalking = false
-        if activeTween then
-            activeTween:Cancel()
-        end
+        activeWalk = false
         Fluent:Notify({Title="SmartWalk",Content="หยุดเดินแล้ว ❌",Duration=2})
     end
 })
@@ -221,9 +191,7 @@ Tabs.Rejoin:AddSlider("RejoinTimeSlider",{
     Title="เวลา Rejoin (นาที)",
     Description="ตั้งเวลา 1-5 นาที",
     Default=1, Min=1, Max=5, Rounding=1,
-    Callback=function(value)
-        rejoinTime = value
-    end
+    Callback=function(value) rejoinTime = value end
 })
 
 Tabs.Rejoin:AddButton({
@@ -253,37 +221,6 @@ Tabs.Rejoin:AddButton({
         Label.TextScaled = true
         Label.Text = tostring(rejoinTime*60)
         Label.Parent = Frame
-
-        -- Dragging
-        local dragging = false
-        local dragInput, mousePos, framePos
-
-        Frame.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = true
-                mousePos = input.Position
-                framePos = Frame.Position
-                input.Changed:Connect(function()
-                    if input.UserInputState == Enum.UserInputState.End then
-                        dragging = false
-                    end
-                end)
-            end
-        end)
-
-        Frame.InputChanged:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseMovement then
-                dragInput = input
-            end
-        end)
-
-        UserInputService.InputChanged:Connect(function(input)
-            if input == dragInput and dragging then
-                local delta = input.Position - mousePos
-                Frame.Position = UDim2.new(framePos.X.Scale, framePos.X.Offset + delta.X,
-                                           framePos.Y.Scale, framePos.Y.Offset + delta.Y)
-            end
-        end)
 
         -- Countdown
         task.spawn(function()
