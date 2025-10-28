@@ -250,16 +250,15 @@ pcall(
         end
     end
 )
--- == Utility Functions ==
-local function getPing()
-    -- ✅ ตรวจสอบว่าคือ "ตัวจริง" ไม่ใช่ Dummy Clone
+-- ✅ ตรวจสอบว่าคือ "ตัวจริง" ไม่ใช่ Dummy Clone
 local function isRealCharacter(model)
     if not model then return false end
     local hum = model:FindFirstChild("Humanoid")
     local hrp = model:FindFirstChild("HumanoidRootPart")
     return hum and hrp and hum.Health > 0
 end
-
+-- == Utility Functions ==
+local function getPing()
     local stats = LocalPlayer:FindFirstChild("PlayerGui") and LocalPlayer.PlayerGui:FindFirstChild("NetworkStats")
     if stats then
         local pingText = stats:FindFirstChild("PingLabel")
@@ -1346,30 +1345,44 @@ if Remote and Remote.FireServer then
         oldFire = hookfunction(Remote.FireServer, function(self, ...)
             if self ~= Remote then return oldFire(self, ...) end
             local args = {...}
-            ifSilentAimEnabled and args[2] == "shoot_gun" and CurrentTarget then
-		local head = CurrentTarget.Character and CurrentTarget.Character:FindFirstChild("Head")
-		local hrp = CurrentTarget.Character and CurrentTarget.Character:FindFirstChild("HumanoidRootPart")
-		local humanoid = CurrentTarget.Character:FindFirstChild("Humanoid")
-		if head and humanoid and hrp then
-			local aimPos = predictPosition(head, hrp)
-			local displacement = aimPos - head.Position
-			local hitCFrame = CurrentTarget.Character:GetPivot() + displacement
-			local previousHealth = humanoid.Health
+            if SilentAimEnabled and args[2] == "shoot_gun" then
+    local CurrentTarget = getClosestTarget()
+    if CurrentTarget and isRealCharacter(CurrentTarget.Character) then
+        local head = CurrentTarget.Character:FindFirstChild("Head")
+        local hrp = CurrentTarget.Character:FindFirstChild("HumanoidRootPart")
+        local humanoid = CurrentTarget.Character:FindFirstChild("Humanoid")
 
-			-- Check if target is behind a wall (calculated but not used for conditional logic in original; kept for potential future use)
-			local isObstructed = isBehindWall(LocalPlayer.Character.Head.Position, aimPos)
+        if head and hrp and humanoid and humanoid.Health > 0 then
+            local myPos = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Head").Position
+            local aimPos = predictPosition(head, hrp)
 
-			args[4] = CFrame.new(math.huge, math.huge, math.huge)
+            -- ✅ ยิงทะลุกำแพง ถ้ามีสิ่งกีดขวาง
+            if isBehindWall(myPos, aimPos) then
+                args[5] = {
+                    [1] = {
+                        [1] = {
+                            ["Instance"] = hrp,
+                            ["Normal"] = Vector3.new(0, 1, 0),
+                            ["Position"] = aimPos
+                        }
+                    }
+                }
+            else
+                args[5] = {
+                    [1] = {
+                        [1] = {
+                            ["Instance"] = head,
+                            ["Normal"] = Vector3.new(0, 1, 0),
+                            ["Position"] = aimPos
+                        }
+                    }
+                }
+            end
 
-			args[5] = {
-				[1] = {
-					[1] = {
-						["Instance"] = head,
-						["Normal"] = Vector3.new(0, 1, 0),
-						["Position"] = aimPos
-					}
-				}
-			}
+            args[4] = CFrame.new(math.huge, math.huge, math.huge)
+        end
+    end
+end
 
                     -- ✅ เอฟเฟกต์กระสุน
                     local success, beam = pcall(function()
