@@ -71,7 +71,14 @@ else
         end
     }
 end
-local ConfigManager = Window.ConfigManager
+-- ✅ ถ้า WindUI โหลดไม่สำเร็จ ให้ใช้ ConfigManager ปลอม
+local ConfigManager = Window.ConfigManager or {
+    CreateConfig = function()
+        return {
+            Register = function() end
+        }
+    end
+}
 local myConfig = ConfigManager:CreateConfig("MokunConfig")
 local TweenService = game:GetService("TweenService")
 local ScreenGui = Instance.new("ScreenGui")
@@ -1346,7 +1353,7 @@ if Remote and Remote.FireServer then
             if self ~= Remote then return oldFire(self, ...) end
             local args = {...}
             if SilentAimEnabled and args[2] == "shoot_gun" then
-    local CurrentTarget = getClosestTarget()
+    CurrentTarget = getClosestTarget()
     if CurrentTarget and isRealCharacter(CurrentTarget.Character) then
         local head = CurrentTarget.Character:FindFirstChild("Head")
         local hrp = CurrentTarget.Character:FindFirstChild("HumanoidRootPart")
