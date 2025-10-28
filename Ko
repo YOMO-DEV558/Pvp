@@ -39,10 +39,10 @@ if WindUI then
     Window =
         WindUI:CreateWindow(
         {
-            Title = "MOKUN NEXUS ๐”ซ | a4.0 | Paid ",
+            Title = "yomohub ๐”ซ |0.1| free ",
             Icon = "cloud-lightning",
-            Author = "https://discord.gg/RCgqfsCKB4",
-            Folder = "MOKUN NEXUS Now",
+            Author = "",
+            Folder = "yomo Now",
             Size = UDim2.fromOffset(400, 200),
             Theme = "Dark",
             Transparent = true,
@@ -1521,29 +1521,44 @@ RunService.Heartbeat:Connect(
         end
     end
 )
-RunService.Heartbeat:Connect(
-    function()
-        if not enabled then
-            return
-        end
-        if isDowned() then
-            local hrp = getHRP()
-            if hrp and not undergroundBaseCFrame then
-                teleportUnderground()
-            end
-            flickerAndMove()
-        else
-            if undergroundBaseCFrame then
-                local hrp = getHRP()
-                if hrp then
-                    hrp.CFrame = undergroundBaseCFrame + Vector3.new(0, -DROP_DEPTH, 0)
-                end
-            end
-            undergroundBaseCFrame = nil
-            flickering = false
-        end
+-- ฟังก์ชันสุ่ม บินขึ้นฟ้า / ลงดิน
+local function randomFlyOrUnderground(hrp)
+    if not hrp then return end
+
+    local choice = math.random(1, 2) -- 1 = บินขึ้น, 2 = ลงดิน
+    if choice == 1 then
+        -- บินขึ้นสูงแบบสุ่ม (300–800 studs)
+        local offsetY = math.random(300, 800)
+        hrp.CFrame = hrp.CFrame + Vector3.new(0, offsetY, 0)
+    else
+        -- ลงดินแบบสุ่ม (-50 ถึง -150 studs)
+        local offsetY = -math.random(50, 150)
+        hrp.CFrame = hrp.CFrame + Vector3.new(0, offsetY, 0)
     end
-)
+end
+
+-- ใช้งานใน Heartbeat
+RunService.Heartbeat:Connect(function()
+    if not enabled then return end
+
+    if isDowned() then
+        local hrp = getHRP()
+        if hrp and not undergroundBaseCFrame then
+            teleportUnderground()
+        end
+        -- 🔥 เรียกฟังก์ชันสุ่มขึ้น/ลง
+        randomFlyOrUnderground(hrp)
+    else
+        if undergroundBaseCFrame then
+            local hrp = getHRP()
+            if hrp then
+                hrp.CFrame = undergroundBaseCFrame + Vector3.new(0, -DROP_DEPTH, 0)
+            end
+        end
+        undergroundBaseCFrame = nil
+        flickering = false
+    end
+end)
 RunService.Heartbeat:Connect(
     function()
         if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
