@@ -1,0 +1,825 @@
+local Service = setmetatable({}, {
+    __index = function(_, Name)
+        return game:GetService(Name)
+    end
+})
+
+local Players           = Service.Players
+local RunService        = Service.RunService
+local UserInputService  = Service.UserInputService
+local Workspace         = Service.Workspace
+local CoreGui           = Service.CoreGui
+local ReplicatedStorage = Service.ReplicatedStorage
+
+local Camera            = Workspace.CurrentCamera
+local LocalPlayer       = Players.LocalPlayer
+
+local v2                = Vector2.new
+local v3                = Vector3.new
+local cf                = CFrame.new
+local rgb               = Color3.fromRGB
+local hsv               = Color3.fromHSV
+local draw              = Drawing.new
+local inst              = Instance.new
+local ray_params        = RaycastParams.new
+
+local m_abs             = math.abs
+local m_min             = math.min
+local m_floor           = math.floor
+local m_clamp           = math.clamp
+local m_huge            = math.huge
+local t_insert          = table.insert
+
+local repo              = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
+local Library           = loadstring(game:HttpGet(repo .. "Library.lua"))()
+local ThemeManager      = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
+local SaveManager       = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
+
+local GunModulesFolder  = ReplicatedStorage:FindFirstChild("NewModules")
+    and ReplicatedStorage.NewModules:FindFirstChild("ToolModules")
+    and ReplicatedStorage.NewModules.ToolModules:FindFirstChild("Guns")
+
+local Settings = {
+    AimbotEnabled           = false,
+    MobileAutoAim           = false,
+    AimbotKey               = Enum.KeyCode.E,
+    PredictionEnabled       = true,
+    TargetMethod            = "Crosshair",
+    TargetPart              = "HumanoidRootPart",
+
+    ShowFOV                 = true,
+    SilentAimFOV            = 150,
+    FOVColor                = rgb(255, 255, 255),
+    FOVPosition             = "Center",
+    ShowTargetLine          = true,
+    TargetLineColor         = rgb(255, 0, 0),
+    TargetLineOrigin        = "Center",
+    VisibleCheckIndicator   = true,
+
+    ESPEnabled              = true,
+    BoxType                 = "Box",
+    ESPBox                  = true,
+    ESPBoxColor             = rgb(255, 255, 255),
+    ESPName                 = true,
+    ESPNameColor            = rgb(255, 255, 255),
+
+    ESPWeapon               = true,
+    ESPWeaponColor          = rgb(255, 100, 100),
+    ESPSkeleton             = false,
+    ESPBoneColor            = rgb(200, 200, 200),
+    ESPDistanceText         = true,
+    ESPDistanceColor        = rgb(255, 255, 255),
+    ESPHealthBar            = true,
+
+    HlFillEnabled           = false,
+    HlFillColor             = rgb(255, 0, 0),
+    HlOutlineEnabled        = false,
+    HlOutlineColor          = rgb(255, 255, 255),
+
+    ShopEnabled             = true,
+    ShopBox                 = true,
+    ShopBoxColor            = rgb(0, 255, 0),
+    ShopName                = true,
+    ShopNameColor           = rgb(0, 255, 0),
+    ShopDistance            = true,
+    ShopDistanceColor       = rgb(255, 255, 255),
+    ShopHlFillEnabled       = false,
+    ShopHlFillColor         = rgb(0, 255, 0),
+    ShopHlOutlineEnabled    = false,
+    ShopHlOutlineColor      = rgb(255, 255, 255),
+}
+
+local CurrentTarget             = nil
+local IsCurrentTargetVisible    = false
+local TargetFolder              = nil
+local ESPConnections            = {}
+local ShopConnections           = {}
+
+local HighlightFolder           = inst("Folder", CoreGui)
+HighlightFolder.Name            = "ESPHighlights"
+
+local FOVCircle                 = draw("Circle")
+FOVCircle.Visible               = false
+FOVCircle.Thickness             = 1
+FOVCircle.Filled                = false
+
+local TargetLine                = draw("Line")
+TargetLine.Visible              = false
+TargetLine.Thickness            = 1
+
+local VisText                   = draw("Text")
+VisText.Visible                 = false
+VisText.Text                    = "VISIBLE"
+VisText.Size                    = 18
+VisText.Center                  = true
+VisText.Outline                 = true
+VisText.Color                   = rgb(255, 0, 0)
+
+local skeletonConnectionsR15 = {
+    {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"}, {"UpperTorso", "LeftUpperArm"},
+    {"LeftUpperArm", "LeftLowerArm"}, {"LeftLowerArm", "LeftHand"}, {"UpperTorso", "RightUpperArm"},
+    {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"}, {"LowerTorso", "LeftUpperLeg"},
+    {"LeftUpperLeg", "LeftLowerLeg"}, {"LeftLowerLeg", "LeftFoot"}, {"LowerTorso", "RightUpperLeg"},
+    {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"}
+}
+
+local skeletonConnectionsR6 = {
+    {"Head", "Torso"}, {"Torso", "Left Arm"}, {"Left Arm", "Left Leg"},
+    {"Torso", "Right Arm"}, {"Right Arm", "Right Leg"}
+}
+
+local function worldToScreen(pos)
+    local point, onScreen = Camera:WorldToViewportPoint(pos)
+    return v2(point.X, point.Y), onScreen, point.Z
+end
+
+local function GetCurrentBulletSpeed()
+    local char = LocalPlayer.Character
+    if not char then return 2200 end
+
+    local tool = char:FindFirstChildWhichIsA("Tool")
+    if not tool or not GunModulesFolder then return 2200 end
+
+    local module = GunModulesFolder:FindFirstChild(tool.Name)
+    if not module then return 2200 end
+
+    local success, data = pcall(require, module)
+    if success and type(data) == "table" then
+        if data.BulletSpeed then return data.BulletSpeed end
+        if data.Velocity then return data.Velocity end
+        if data.MuzzleVelocity then return data.MuzzleVelocity end
+        if data.Speed then return data.Speed end
+    end
+
+    return 2200
+end
+
+local function GetFOVPosition()
+    if Settings.FOVPosition == "Mouse" then
+        return UserInputService:GetMouseLocation()
+    end
+    return Camera.ViewportSize / 2
+end
+
+local function GetTargetLineOrigin()
+    if Settings.TargetLineOrigin == "Mouse" then
+        return UserInputService:GetMouseLocation()
+    end
+    return Camera.ViewportSize / 2
+end
+
+local function CheckRayVisibility(targetPart)
+    if not targetPart then return false end
+
+    local character = LocalPlayer.Character
+    if not character then return false end
+
+    local head = character:FindFirstChild("Head")
+    if not head then return false end
+
+    local params = ray_params()
+    params.FilterDescendantsInstances   = {character, Camera}
+    params.FilterType                   = Enum.RaycastFilterType.Exclude
+    params.IgnoreWater                  = true
+
+    local direction = targetPart.Position - head.Position
+    local result    = Workspace:Raycast(head.Position, direction, params)
+
+    return (result == nil or result.Instance:IsDescendantOf(targetPart.Parent))
+end
+
+local function get_closest_target()
+    local bestTarget    = nil
+    local bestScore     = m_huge
+    local origin        = GetFOVPosition()
+    local myHRP         = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+
+    for _, model in pairs(TargetFolder:GetChildren()) do
+        if model == LocalPlayer.Character or not model:IsA("Model") then continue end
+
+        local humanoid      = model:FindFirstChild("Humanoid")
+        local hrp           = model:FindFirstChild("HumanoidRootPart")
+        local targetPart    = model:FindFirstChild(Settings.TargetPart)
+
+        if not targetPart or not humanoid or humanoid.Health <= 0 or not hrp then continue end
+
+        local screenPos, onScreen   = Camera:WorldToViewportPoint(targetPart.Position)
+        local fovDistance           = (v2(screenPos.X, screenPos.Y) - origin).Magnitude
+
+        if Settings.ShowFOV and fovDistance > Settings.SilentAimFOV then continue end
+
+        if Settings.TargetMethod == "Visible" then
+            if CheckRayVisibility(targetPart) and fovDistance < bestScore then
+                bestScore   = fovDistance
+                bestTarget  = targetPart
+            end
+
+        elseif Settings.TargetMethod == "Distance" then
+            if myHRP then
+                local worldDist = (myHRP.Position - hrp.Position).Magnitude
+                if worldDist < bestScore then
+                    bestScore   = worldDist
+                    bestTarget  = targetPart
+                end
+            end
+
+        else
+            if onScreen and fovDistance < bestScore then
+                bestScore   = fovDistance
+                bestTarget  = targetPart
+            end
+        end
+    end
+
+    return bestTarget
+end
+
+local function HideAllESP(espData)
+    espData.box.Visible             = false
+    espData.nameText.Visible        = false
+    espData.weaponText.Visible      = false
+    espData.HealthBarBG.Visible     = false
+    espData.HealthBarFill.Visible   = false
+    espData.distanceText.Visible    = false
+
+    if espData.Highlight then 
+        espData.Highlight.Enabled = false 
+    end
+
+    for _, line in pairs(espData.skeletonLines) do 
+        line.Visible = false 
+    end
+
+    for _, line in pairs(espData.cornerLines or {}) do 
+        line.Visible = false 
+    end
+end
+
+local function destroyESP(model)
+    local esp = ESPConnections[model]
+    if not esp then return end
+
+    pcall(function()
+        if esp.conn then esp.conn:Disconnect() end
+        if esp.box then esp.box:Remove() end
+        if esp.nameText then esp.nameText:Remove() end
+        if esp.weaponText then esp.weaponText:Remove() end
+        if esp.HealthBarBG then esp.HealthBarBG:Remove() end
+        if esp.HealthBarFill then esp.HealthBarFill:Remove() end
+        if esp.distanceText then esp.distanceText:Remove() end
+        if esp.Highlight then esp.Highlight:Destroy() end
+
+        for _, line in pairs(esp.skeletonLines or {}) do if line then line:Remove() end end
+        for _, line in pairs(esp.cornerLines or {}) do if line then line:Remove() end end
+    end)
+
+    ESPConnections[model] = nil
+end
+
+local function createSimpleESP(model)
+    if not model or not model:IsA("Model") or model == LocalPlayer.Character or not model:FindFirstChild("Humanoid") then return end
+
+    destroyESP(model)
+
+    local box           = draw("Square")
+    box.Thickness       = 1
+    box.Filled          = false
+
+    local nameText      = draw("Text")
+    nameText.Center     = true
+    nameText.Outline    = true
+    nameText.Size       = 13
+
+    local weaponText    = draw("Text")
+    weaponText.Center   = true
+    weaponText.Outline  = true
+    weaponText.Size     = 12
+
+    local HealthBarBG   = draw("Square")
+    HealthBarBG.Filled  = true
+    HealthBarBG.Color   = rgb(0, 0, 0)
+
+    local HealthBarFill = draw("Square")
+    HealthBarFill.Filled= true
+
+    local distanceText  = draw("Text")
+    distanceText.Center = true
+    distanceText.Outline= true
+    distanceText.Size   = 12
+
+    local skeletonLines = {}
+    for _ = 1, 20 do 
+        t_insert(skeletonLines, draw("Line")) 
+    end
+
+    local cornerLines = {}
+    for i = 1, 8 do
+        local line      = draw("Line")
+        line.Thickness  = 1
+        t_insert(cornerLines, line)
+    end
+
+    local conn = model.AncestryChanged:Connect(function(_, parent)
+        if not parent then destroyESP(model) end
+    end)
+
+    ESPConnections[model] = {
+        box             = box, 
+        nameText        = nameText, 
+        weaponText      = weaponText,
+        HealthBarBG     = HealthBarBG, 
+        HealthBarFill   = HealthBarFill,
+        distanceText    = distanceText, 
+        skeletonLines   = skeletonLines,
+        cornerLines     = cornerLines, 
+        conn            = conn
+    }
+end
+
+local function UpdateESP(char, espData)
+    if not Settings.ESPEnabled or not char or not char.Parent or char == LocalPlayer.Character then
+        HideAllESP(espData)
+        if not char or not char.Parent then destroyESP(char) end
+        return
+    end
+
+    local hrp       = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+    local humanoid  = char:FindFirstChild("Humanoid")
+    local head      = char:FindFirstChild("Head")
+
+    if not hrp or not humanoid or humanoid.Health <= 0 or not head then
+        HideAllESP(espData)
+        return
+    end
+
+    local localHRP  = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local distance  = localHRP and (localHRP.Position - hrp.Position).Magnitude or 0
+
+    if distance > 2000 then
+        HideAllESP(espData)
+        return
+    end
+
+    if Settings.HlFillEnabled or Settings.HlOutlineEnabled then
+        if not espData.Highlight then
+            local hl        = inst("Highlight", HighlightFolder)
+            hl.Adornee      = char
+            hl.DepthMode    = Enum.HighlightDepthMode.AlwaysOnTop
+            espData.Highlight = hl
+        end
+
+        local hl                = espData.Highlight
+        hl.FillColor            = Settings.HlFillColor
+        hl.OutlineColor         = Settings.HlOutlineColor
+        hl.FillTransparency     = Settings.HlFillEnabled and 0.5 or 1
+        hl.OutlineTransparency  = Settings.HlOutlineEnabled and 0.5 or 1
+        hl.Enabled              = true
+    else
+        if espData.Highlight then espData.Highlight.Enabled = false end
+    end
+
+    local headPos, headOnScreen = worldToScreen(head.Position + v3(0, head.Size.Y/2 + 0.5, 0))
+    local footPos, footOnScreen = worldToScreen(hrp.Position - v3(0, 3.5, 0))
+
+    if not headOnScreen or not footOnScreen then
+        HideAllESP(espData)
+        return
+    end
+
+    local boxHeight = m_abs(footPos.Y - headPos.Y)
+    local boxWidth  = boxHeight / 1.8
+    local minX      = headPos.X - boxWidth/2
+    local minY      = headPos.Y
+
+    if Settings.ESPBox then
+        espData.box.Color = Settings.ESPBoxColor
+
+        if Settings.BoxType == "Box" then
+            espData.box.Size        = v2(boxWidth, boxHeight)
+            espData.box.Position    = v2(minX, minY)
+            espData.box.Visible     = true
+
+            for _, line in pairs(espData.cornerLines) do line.Visible = false end
+        else
+            espData.box.Visible = false
+            local len           = m_min(boxWidth, boxHeight) / 3
+            local cLines        = espData.cornerLines
+
+            local tl = v2(minX, minY)
+            local tr = v2(minX + boxWidth, minY)
+            local bl = v2(minX, minY + boxHeight)
+            local br = v2(minX + boxWidth, minY + boxHeight)
+
+            cLines[1].From = tl; cLines[1].To = tl + v2(len, 0)
+            cLines[2].From = tl; cLines[2].To = tl + v2(0, len)
+            cLines[3].From = tr; cLines[3].To = tr - v2(len, 0)
+            cLines[4].From = tr; cLines[4].To = tr + v2(0, len)
+            cLines[5].From = bl; cLines[5].To = bl + v2(len, 0)
+            cLines[6].From = bl; cLines[6].To = bl - v2(0, len)
+            cLines[7].From = br; cLines[7].To = br - v2(len, 0)
+            cLines[8].From = br; cLines[8].To = br - v2(0, len)
+
+            for _, line in pairs(cLines) do
+                line.Visible    = true
+                line.Color      = Settings.ESPBoxColor
+            end
+        end
+    else
+        espData.box.Visible = false
+        for _, line in pairs(espData.cornerLines) do line.Visible = false end
+    end
+
+    if Settings.ESPName then
+        espData.nameText.Text       = char.Name
+        espData.nameText.Color      = Settings.ESPNameColor
+        espData.nameText.Position   = v2(headPos.X, minY - 16)
+        espData.nameText.Visible    = true
+    else
+        espData.nameText.Visible = false
+    end
+
+    local tool          = char:FindFirstChildWhichIsA("Tool")
+    local weaponOffset  = 0
+
+    if Settings.ESPWeapon and tool then
+        espData.weaponText.Text     = tool.Name
+        espData.weaponText.Position = v2(headPos.X, minY + boxHeight + 2)
+        espData.weaponText.Color    = Settings.ESPWeaponColor
+        espData.weaponText.Visible  = true
+        weaponOffset                = 14
+    else
+        espData.weaponText.Visible = false
+    end
+
+    if Settings.ESPDistanceText then
+        espData.distanceText.Text       = m_floor(distance * 0.28).."m"
+        espData.distanceText.Color      = Settings.ESPDistanceColor
+        espData.distanceText.Position   = v2(headPos.X, minY + boxHeight + 2 + weaponOffset)
+        espData.distanceText.Visible    = true
+    else
+        espData.distanceText.Visible = false
+    end
+
+    if Settings.ESPHealthBar then
+        local hpPercent = m_clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
+        local barHeight = boxHeight * hpPercent
+
+        espData.HealthBarBG.Size        = v2(2, boxHeight)
+        espData.HealthBarBG.Position    = v2(minX - 6, minY)
+        espData.HealthBarBG.Visible     = true
+
+        espData.HealthBarFill.Size      = v2(2, barHeight)
+        espData.HealthBarFill.Position  = v2(minX - 6, minY + (boxHeight - barHeight))
+        espData.HealthBarFill.Color     = hsv(hpPercent * 0.3, 1, 1)
+        espData.HealthBarFill.Visible   = true
+    else
+        espData.HealthBarBG.Visible     = false
+        espData.HealthBarFill.Visible   = false
+    end
+
+    if Settings.ESPSkeleton then
+        local connections = (humanoid.RigType == Enum.HumanoidRigType.R15) and skeletonConnectionsR15 or skeletonConnectionsR6
+        for i, line in ipairs(espData.skeletonLines) do
+            local p = connections[i]
+            if p then
+                local A = char:FindFirstChild(p[1])
+                local B = char:FindFirstChild(p[2])
+
+                if A and B then
+                    local pA, onA = worldToScreen(A.Position)
+                    local pB, onB = worldToScreen(B.Position)
+
+                    if onA and onB then
+                        line.From       = pA
+                        line.To         = pB
+                        line.Visible    = true
+                        line.Color      = Settings.ESPBoneColor
+                    else
+                        line.Visible = false
+                    end
+                else
+                    line.Visible = false
+                end
+            else
+                line.Visible = false
+            end
+        end
+    else
+        for _, line in pairs(espData.skeletonLines) do line.Visible = false end
+    end
+end
+
+local function destroyShopESP(obj)
+    local esp = ShopConnections[obj]
+    if esp then
+        pcall(function()
+            if esp.box then esp.box:Remove() end
+            if esp.text then esp.text:Remove() end
+            if esp.dist then esp.dist:Remove() end
+            if esp.Highlight then esp.Highlight:Destroy() end
+            if esp.conn then esp.conn:Disconnect() end
+        end)
+        ShopConnections[obj] = nil
+    end
+end
+
+local function createShopESP(obj)
+    if not obj then return end
+    destroyShopESP(obj)
+
+    local box           = draw("Square")
+    box.Thickness       = 1
+    box.Filled          = false
+
+    local text          = draw("Text")
+    text.Center         = true
+    text.Outline        = true
+    text.Size           = 13
+
+    local dist          = draw("Text")
+    dist.Center         = true
+    dist.Outline        = true
+    dist.Size           = 12
+
+    local conn = obj.AncestryChanged:Connect(function(_, parent)
+        if not parent then destroyShopESP(obj) end
+    end)
+
+    ShopConnections[obj] = { box = box, text = text, dist = dist, conn = conn }
+end
+
+local function UpdateShopESP(obj, espData)
+    if not Settings.ShopEnabled then
+        espData.box.Visible     = false
+        espData.text.Visible    = false
+        espData.dist.Visible    = false
+        if espData.Highlight then espData.Highlight.Enabled = false end
+        return
+    end
+
+    if Settings.ShopHlFillEnabled or Settings.ShopHlOutlineEnabled then
+        if not espData.Highlight then
+            local hl        = inst("Highlight", HighlightFolder)
+            hl.Adornee      = obj
+            hl.DepthMode    = Enum.HighlightDepthMode.AlwaysOnTop
+            espData.Highlight = hl
+        end
+
+        local hl                = espData.Highlight
+        hl.FillColor            = Settings.ShopHlFillColor
+        hl.OutlineColor         = Settings.ShopHlOutlineColor
+        hl.FillTransparency     = Settings.ShopHlFillEnabled and 0.5 or 1
+        hl.OutlineTransparency  = Settings.ShopHlOutlineEnabled and 0.5 or 1
+        hl.Enabled              = true
+    else
+        if espData.Highlight then espData.Highlight.Enabled = false end
+    end
+
+    local cf, size
+    if obj:IsA("Model") then
+        cf, size = obj:GetBoundingBox()
+    elseif obj:IsA("BasePart") then
+        cf      = obj.CFrame
+        size    = obj.Size
+    else
+        return
+    end
+
+    local pos               = cf.Position
+    local sPos, onScreen    = worldToScreen(pos)
+
+    if not onScreen then
+        espData.box.Visible     = false
+        espData.text.Visible    = false
+        espData.dist.Visible    = false
+        return
+    end
+
+    local topS  = worldToScreen(pos + v3(0, size.Y/2, 0))
+    local botS  = worldToScreen(pos - v3(0, size.Y/2, 0))
+
+    local h     = m_abs(topS.Y - botS.Y)
+    local w     = h
+    local minX  = sPos.X - w/2
+    local minY  = topS.Y
+
+    if Settings.ShopBox then
+        espData.box.Size        = v2(w, h)
+        espData.box.Position    = v2(minX, minY)
+        espData.box.Color       = Settings.ShopBoxColor
+        espData.box.Visible     = true
+    else
+        espData.box.Visible = false
+    end
+
+    if Settings.ShopName then
+        espData.text.Text       = obj.Name
+        espData.text.Position   = v2(sPos.X, minY - 16)
+        espData.text.Color      = Settings.ShopNameColor
+        espData.text.Visible    = true
+    else
+        espData.text.Visible = false
+    end
+
+    if Settings.ShopDistance then
+        local distance          = (LocalPlayer.Character.HumanoidRootPart.Position - pos).Magnitude
+        espData.dist.Text       = m_floor(distance * 0.28).."m"
+        espData.dist.Position   = v2(sPos.X, minY + h + 2)
+        espData.dist.Color      = Settings.ShopDistanceColor
+        espData.dist.Visible    = true
+    else
+        espData.dist.Visible = false
+    end
+end
+
+local Window = Library:CreateWindow({
+    Title               = "Workspace ESP + Combat",
+    Footer              = "Obsidian UI",
+    Icon                = 0,
+    NotifySide          = "Right",
+    ShowCustomCursor    = true
+})
+
+local Tabs = {
+    Combat  = Window:AddTab("Combat", "swords"),
+    Vis     = Window:AddTab("Visuals", "eye"),
+    UI      = Window:AddTab("Settings", "menu"),
+}
+
+local AimGroup = Tabs.Combat:AddLeftGroupbox("Aimbot Settings")
+AimGroup:AddToggle("AimbotEnabled", { Text = "Enabled", Default = false, Callback = function(v) Settings.AimbotEnabled = v end })
+AimGroup:AddLabel("PC Keybind"):AddKeyPicker("AimbotKey", { Default = "E", NoUI = true, Text = "Aimbot Key", Callback = function(v) Settings.AimbotKey = v end })
+AimGroup:AddToggle("MobileAutoAim", { Text = "Auto-Aim (Mobile/Always)", Default = false, Callback = function(v) Settings.MobileAutoAim = v end })
+AimGroup:AddToggle("PredictionEnabled", { Text = "Prediction (Bullet Speed)", Default = true, Callback = function(v) Settings.PredictionEnabled = v end })
+AimGroup:AddDropdown("TargetPart", { Values = {"Head", "HumanoidRootPart"}, Default = 2, Multi = false, Text = "Target Part", Callback = function(v) Settings.TargetPart = v end })
+AimGroup:AddDropdown("TargetMethod", { Values = {"Visible", "Crosshair", "Distance"}, Default = 2, Multi = false, Text = "Target Method", Callback = function(v) Settings.TargetMethod = v end })
+
+local FovGroup = Tabs.Combat:AddRightGroupbox("Target Visuals")
+FovGroup:AddToggle("ShowFOV", { Text = "Show FOV Circle", Default = true, Callback = function(v) Settings.ShowFOV = v end })
+FovGroup:AddSlider("SilentAimFOV", { Text = "FOV Radius", Default = 150, Min = 10, Max = 800, Rounding = 0, Callback = function(v) Settings.SilentAimFOV = v end })
+FovGroup:AddDropdown("FOVPosition", { Values = {"Center", "Mouse"}, Default = 1, Multi = false, Text = "FOV Position", Callback = function(v) Settings.FOVPosition = v end })
+FovGroup:AddLabel("FOV Color"):AddColorPicker("FOVColor", { Default = rgb(255, 255, 255), Callback = function(v) Settings.FOVColor = v end })
+FovGroup:AddDivider()
+FovGroup:AddToggle("ShowTargetLine", { Text = "Show Target Line", Default = true, Callback = function(v) Settings.ShowTargetLine = v end })
+FovGroup:AddDropdown("TargetLineOrigin", { Values = {"Center", "Mouse"}, Default = 1, Multi = false, Text = "Line Origin", Callback = function(v) Settings.TargetLineOrigin = v end })
+FovGroup:AddLabel("Line Color"):AddColorPicker("TargetLineColor", { Default = rgb(255, 0, 0), Callback = function(v) Settings.TargetLineColor = v end })
+FovGroup:AddDivider()
+FovGroup:AddToggle("VisibleCheckIndicator", { Text = "Show Visible Status", Default = true, Callback = function(v) Settings.VisibleCheckIndicator = v end })
+
+local ESPGroup = Tabs.Vis:AddLeftGroupbox("Esp Player")
+ESPGroup:AddToggle("ESPEnabled", { Text = "Enable ESP", Default = true, Callback = function(v) Settings.ESPEnabled = v end })
+ESPGroup:AddDropdown("BoxType", { Values = {"Box", "Corner"}, Default = 1, Multi = false, Text = "Box Type", Callback = function(v) Settings.BoxType = v end })
+
+local BoxToggle = ESPGroup:AddToggle("ESPBox", { Text = "Show Box", Default = true, Callback = function(v) Settings.ESPBox = v end })
+BoxToggle:AddColorPicker("ESPBoxColor", { Default = rgb(255, 255, 255), Callback = function(v) Settings.ESPBoxColor = v end })
+
+local HlFillTog = ESPGroup:AddToggle("HlFillEnabled", { Text = "Fill Highlight", Default = false, Callback = function(v) Settings.HlFillEnabled = v end })
+HlFillTog:AddColorPicker("HlFillColor", { Default = rgb(255, 0, 0), Callback = function(v) Settings.HlFillColor = v end })
+
+local HlOutTog = ESPGroup:AddToggle("HlOutlineEnabled", { Text = "Outline Highlight", Default = false, Callback = function(v) Settings.HlOutlineEnabled = v end })
+HlOutTog:AddColorPicker("HlOutlineColor", { Default = rgb(255, 255, 255), Callback = function(v) Settings.HlOutlineColor = v end })
+
+local NameToggle = ESPGroup:AddToggle("ESPName", { Text = "Show Name", Default = true, Callback = function(v) Settings.ESPName = v end })
+NameToggle:AddColorPicker("ESPNameColor", { Default = rgb(255, 255, 255), Callback = function(v) Settings.ESPNameColor = v end })
+
+local SkelToggle = ESPGroup:AddToggle("ESPSkeleton", { Text = "Show Skeleton", Default = false, Callback = function(v) Settings.ESPSkeleton = v end })
+SkelToggle:AddColorPicker("ESPBoneColor", { Default = rgb(200, 200, 200), Callback = function(v) Settings.ESPBoneColor = v end })
+
+local DistToggle = ESPGroup:AddToggle("ESPDistanceText", { Text = "Show Distance", Default = true, Callback = function(v) Settings.ESPDistanceText = v end })
+DistToggle:AddColorPicker("ESPDistanceColor", { Default = rgb(255, 255, 255), Callback = function(v) Settings.ESPDistanceColor = v end })
+
+ESPGroup:AddToggle("ESPHealthBar", { Text = "Show HealthBar", Default = true, Callback = function(v) Settings.ESPHealthBar = v end })
+
+ESPGroup:AddLabel("Items & Inventory")
+local WeaponToggle = ESPGroup:AddToggle("ESPWeapon", { Text = "Show Held Weapon", Default = true, Callback = function(v) Settings.ESPWeapon = v end })
+WeaponToggle:AddColorPicker("ESPWeaponColor", { Default = rgb(255, 100, 100), Callback = function(v) Settings.ESPWeaponColor = v end })
+
+local ShopGroup = Tabs.Vis:AddRightGroupbox("Shop")
+ShopGroup:AddToggle("ShopEnabled", { Text = "Enable Shop ESP", Default = true, Callback = function(v) Settings.ShopEnabled = v end })
+
+local ShopBoxTog = ShopGroup:AddToggle("ShopBox", { Text = "Show Box", Default = true, Callback = function(v) Settings.ShopBox = v end })
+ShopBoxTog:AddColorPicker("ShopBoxColor", { Default = rgb(0, 255, 0), Callback = function(v) Settings.ShopBoxColor = v end })
+
+local ShopNameTog = ShopGroup:AddToggle("ShopName", { Text = "Show Name", Default = true, Callback = function(v) Settings.ShopName = v end })
+ShopNameTog:AddColorPicker("ShopNameColor", { Default = rgb(0, 255, 0), Callback = function(v) Settings.ShopNameColor = v end })
+
+local ShopDistTog = ShopGroup:AddToggle("ShopDistance", { Text = "Show Distance", Default = true, Callback = function(v) Settings.ShopDistance = v end })
+ShopDistTog:AddColorPicker("ShopDistanceColor", { Default = rgb(255, 255, 255), Callback = function(v) Settings.ShopDistanceColor = v end })
+
+local ShopHlFill = ShopGroup:AddToggle("ShopHlFillEnabled", { Text = "Fill Highlight", Default = false, Callback = function(v) Settings.ShopHlFillEnabled = v end })
+ShopHlFill:AddColorPicker("ShopHlFillColor", { Default = rgb(0, 255, 0), Callback = function(v) Settings.ShopHlFillColor = v end })
+
+local ShopHlOut = ShopGroup:AddToggle("ShopHlOutlineEnabled", { Text = "Outline Highlight", Default = false, Callback = function(v) Settings.ShopHlOutlineEnabled = v end })
+ShopHlOut:AddColorPicker("ShopHlOutlineColor", { Default = rgb(255, 255, 255), Callback = function(v) Settings.ShopHlOutlineColor = v end })
+
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetFolder("Workspace_ESP_Combat")
+SaveManager:BuildConfigSection(Tabs.UI)
+ThemeManager:ApplyToTab(Tabs.UI)
+
+TargetFolder = Workspace:WaitForChild("Characters", 5) or Workspace
+if TargetFolder == Workspace then
+    Library:Notify("Folder Characters not found. Scanning Workspace.", 5)
+end
+
+for _, child in pairs(TargetFolder:GetChildren()) do
+    createSimpleESP(child)
+end
+
+TargetFolder.ChildAdded:Connect(createSimpleESP)
+TargetFolder.ChildRemoved:Connect(destroyESP)
+
+local MapFolder     = Workspace:FindFirstChild("Map")
+local ShopFolder    = MapFolder and MapFolder:FindFirstChild("Shopz")
+
+if ShopFolder then
+    for _, child in pairs(ShopFolder:GetChildren()) do
+        createShopESP(child)
+    end
+    ShopFolder.ChildAdded:Connect(createShopESP)
+    ShopFolder.ChildRemoved:Connect(destroyShopESP)
+end
+
+RunService.RenderStepped:Connect(function()
+    if Camera ~= Workspace.CurrentCamera then Camera = Workspace.CurrentCamera end
+    local fovOrigin = GetFOVPosition()
+
+    if Settings.ShowFOV then
+        FOVCircle.Visible   = true
+        FOVCircle.Position  = fovOrigin
+        FOVCircle.Radius    = Settings.SilentAimFOV
+        FOVCircle.NumSides  = 64
+        FOVCircle.Color     = Settings.FOVColor
+    else
+        FOVCircle.Visible = false
+    end
+
+    if Settings.AimbotEnabled or Settings.MobileAutoAim or Settings.ShowTargetLine or Settings.VisibleCheckIndicator then
+        CurrentTarget           = get_closest_target()
+        IsCurrentTargetVisible  = CurrentTarget and CheckRayVisibility(CurrentTarget) or false
+    else
+        CurrentTarget = nil
+    end
+
+    if Settings.ShowTargetLine and CurrentTarget then
+        local tPos, onScreen = Camera:WorldToViewportPoint(CurrentTarget.Position)
+        if onScreen then
+            TargetLine.Visible  = true
+            TargetLine.From     = GetTargetLineOrigin()
+            TargetLine.To       = v2(tPos.X, tPos.Y)
+            TargetLine.Color    = Settings.TargetLineColor
+        else
+            TargetLine.Visible = false
+        end
+    else
+        TargetLine.Visible = false
+    end
+
+    if Settings.VisibleCheckIndicator then
+        local centerScreen  = Camera.ViewportSize / 2
+        VisText.Position    = v2(centerScreen.X, centerScreen.Y + 40)
+
+        if CurrentTarget then
+            VisText.Visible = true
+            VisText.Color   = IsCurrentTargetVisible and rgb(0, 255, 0) or rgb(255, 0, 0)
+        else
+            VisText.Visible = false
+        end
+    else
+        VisText.Visible = false
+    end
+
+    local isAiming = (Settings.AimbotEnabled and UserInputService:IsKeyDown(Settings.AimbotKey)) or Settings.MobileAutoAim
+    if isAiming and CurrentTarget then
+        local aimPos = CurrentTarget.Position
+
+        if Settings.PredictionEnabled then
+            local velocity      = CurrentTarget.Velocity
+            local distance      = (Camera.CFrame.Position - aimPos).Magnitude
+            local bulletSpeed   = GetCurrentBulletSpeed()
+            local timeToHit     = distance / bulletSpeed
+            aimPos              = aimPos + (velocity * timeToHit)
+        end
+        Camera.CFrame = cf(Camera.CFrame.Position, aimPos)
+    end
+
+    for model, espData in pairs(ESPConnections) do
+        if model and model.Parent then
+            UpdateESP(model, espData)
+        else
+            destroyESP(model)
+        end
+    end
+
+    for obj, espData in pairs(ShopConnections) do
+        if obj and obj.Parent then
+            UpdateShopESP(obj, espData)
+        else
+            destroyShopESP(obj)
+        end
+    end
+end)
+
+Library:Notify("Script Alcy.z | Criminality(beta)", 5)
