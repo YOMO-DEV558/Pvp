@@ -46,7 +46,7 @@ if WindUI then
     Window =
         WindUI:CreateWindow(
         {
-            Title = "yomo🔫 | 0.1z | Premium  ",
+            Title = "YOMO 🔫 | 0.1z | Premium  ",
             Icon = "cloud-lightning",
             Author = "mo",
             Folder = "yomo Now",
@@ -232,6 +232,9 @@ local scanRadius = 12
 local localEventCounter = 0
 local localFuncCounter = 0
 local AutoSprintEnabled = false
+local NoRecoilEnabled = false
+local SprintEnabled = false
+local isSprinting = false
 -- Weapon DB for Items ESP
 local RARITY_COLORS = {
     ["Common"] = Color3.fromRGB(200, 200, 200),
@@ -2153,3 +2156,227 @@ local HitAuraToggle =
     }
 )
 myConfig:Register("HitAura", HitAuraToggle)
+
+-- ===========================
+-- NO RECOIL SYSTEM
+-- ===========================
+
+local lastCameraAngle = nil
+
+RunService.RenderStepped:Connect(function()
+    if NoRecoilEnabled and Camera then
+        if lastCameraAngle == nil then
+            lastCameraAngle = Camera.CFrame.LookVector
+        end
+        -- ป้องกันการเปลี่ยนแปลง Camera จากการยิง
+        -- โดยการรักษา Camera ให้อยู่ในตำแหน่งเดิม
+        local currentAngle = Camera.CFrame.LookVector
+        if (currentAngle - lastCameraAngle).Magnitude > 0.01 then
+            -- ตรวจสอบว่าเป็นการยิง (เปลี่ยนมุมกล้อง)
+            -- ถ้าใช่ให้คืนกล้องไปตำแหน่งเดิม
+            pcall(function()
+                Camera.CFrame = CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position + lastCameraAngle)
+            end)
+        end
+        lastCameraAngle = currentAngle
+    else
+        lastCameraAngle = nil
+    end
+end)
+
+-- ===========================
+-- SPRINT SYSTEM
+-- ===========================
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    -- กดปุ่ม Shift เพื่อวิ่ง
+    if input.KeyCode == Enum.KeyCode.LeftShift then
+        SprintEnabled = true
+        isSprinting = true
+        if Humanoid then
+            Humanoid.WalkSpeed = 50 -- ความเร็ววิ่ง
+        end
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+    if input.KeyCode == Enum.KeyCode.LeftShift then
+        SprintEnabled = false
+        isSprinting = false
+        if Humanoid then
+            Humanoid.WalkSpeed = 16 -- ความเร็วปกติ
+        end
+    end
+end)
+
+-- ===========================
+-- ESP SYSTEM (NAME + BOX)
+-- ===========================
+
+local ESPEnabled = false
+local ESPObjects = {}
+
+local function createESPBox(player)
+    if not player or not player.Character then
+        return nil
+    end
+    
+    local character = player.Character
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    
+    if not humanoidRootPart then
+        return nil
+    end
+    
+    -- สร้าง Billboard GUI สำหรับชื่อ
+    local billboardGui = Instance.new("BillboardGui")
+    billboardGui.Size = UDim2.new(4, 0, 2, 0)
+    billboardGui.MaxDistance = 500
+    billboardGui.Parent = humanoidRootPart
+    
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(1, 0, 1, 0)
+    nameLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    nameLabel.BackgroundTransparency = 0.5
+    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    nameLabel.TextSize = 14
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.Text = player.Name
+    nameLabel.Parent = billboardGui
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 4)
+    corner.Parent = nameLabel
+    
+    -- สร้าง Box ESP ด้วย Drawing
+    local box = Drawing.new("Square")
+    box.Thickness = 2
+    box.Color = Color3.fromRGB(0, 255, 0)
+    box.Filled = false
+    box.Visible = false
+    
+    return {
+        billboardGui = billboardGui,
+        nameLabel = nameLabel,
+        box = box,
+        player = player
+    }
+end
+
+local function updateESPBox(espData)
+    if not espData or not espData.player or not espData.player.Character then
+        return false
+    end
+    
+    local character = espData.player.Character
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character:FindFirstChild("Humanoid")
+    
+    if not humanoidRootPart or not humanoid or humanoid.Health <= 0 then
+        return false
+    end
+    
+    if ESPEnabled then
+        -- อัปเดต Box
+        local screenPos, onScreen = Camera:WorldToViewportPoint(humanoidRootPart.Position)
+        
+        if onScreen then
+            local size = Vector2.new(100, 150)
+            espData.box.Position = Vector2.new(screenPos.X - size.X / 2, screenPos.Y - size.Y / 2)
+            espData.box.Size = size
+            espData.box.Visible = true
+        else
+            espData.box.Visible = false
+        end
+    else
+        espData.box.Visible = false
+    end
+    
+    return true
+end
+
+-- ===========================
+-- ESP TOGGLE
+-- ===========================
+
+-- สร้าง Toggle สำหรับ ESP
+local ESPToggle = Tab:Toggle(
+    {
+        Title = "ESP (Name + Box)",
+        Default = false,
+        Callback = function(state)
+            ESPEnabled = state
+            
+            if state then
+                -- สร้าง ESP สำหรับผู้เล่นทั้งหมด
+                for _, player in ipairs(Players:GetPlayers()) do
+                    if player ~= LocalPlayer and player.Character then
+                        if not ESPObjects[player] then
+                            ESPObjects[player] = createESPBox(player)
+                        end
+                    end
+                end
+            else
+                -- ลบ ESP ทั้งหมด
+                for player, espData in pairs(ESPObjects) do
+                    if espData then
+                        if espData.billboardGui then
+                            espData.billboardGui:Destroy()
+                        end
+                        if espData.box then
+                            espData.box:Remove()
+                        end
+                    end
+                end
+                ESPObjects = {}
+            end
+        end
+    }
+)
+
+-- อัปเดต ESP ทุก frame
+RunService.RenderStepped:Connect(function()
+    if ESPEnabled then
+        for player, espData in pairs(ESPObjects) do
+            if not updateESPBox(espData) then
+                -- ลบ ESP ของผู้เล่นที่ตายแล้ว
+                if espData.billboardGui then
+                    espData.billboardGui:Destroy()
+                end
+                if espData.box then
+                    espData.box:Remove()
+                end
+                ESPObjects[player] = nil
+            end
+        end
+    end
+end)
+
+-- เพิ่ม ESP เมื่อผู้เล่นใหม่เข้ามา
+Players.PlayerAdded:Connect(function(player)
+    if ESPEnabled then
+        player.CharacterAdded:Connect(function(character)
+            task.wait(0.5)
+            if ESPEnabled and not ESPObjects[player] then
+                ESPObjects[player] = createESPBox(player)
+            end
+        end)
+    end
+end)
+
+-- ลบ ESP เมื่อผู้เล่นออก
+Players.PlayerRemoving:Connect(function(player)
+    if ESPObjects[player] then
+        if ESPObjects[player].billboardGui then
+            ESPObjects[player].billboardGui:Destroy()
+        end
+        if ESPObjects[player].box then
+            ESPObjects[player].box:Remove()
+        end
+        ESPObjects[player] = nil
+    end
+end)
+
+print("[MOKUN] No Recoil, Sprint, และ ESP ถูกเพิ่มแล้ว!")
