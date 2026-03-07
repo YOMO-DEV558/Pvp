@@ -9,7 +9,6 @@ local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 local Workspace = game:GetService("Workspace")
 local ContextActionService = game:GetService("ContextActionService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 -- =========================
 -- Local Player & Character
@@ -61,18 +60,23 @@ else
                 Section = function()
                 end,
                 Toggle = function()
+                    return {Set = function() end}
                 end,
                 Slider = function()
+                    return {Set = function() end}
                 end,
                 Button = function()
                 end,
                 Input = function()
-                    return {}
+                    return {Set = function() end}
                 end,
                 Divider = function()
                 end
             }
-        end
+        end,
+        ConfigManager = {
+            CreateConfig = function() return {Register = function() end} end
+        }
     }
 end
 local ConfigManager = Window.ConfigManager
@@ -151,9 +155,7 @@ if not isMobile then -- ซ่อน OpenIcon บนมือถือ
     OpenIcon.MouseButton1Click:Connect(
         function()
             animateButton(OpenIcon)
-            if Window and Window.UI then
-                Window.UI.Enabled = not Window.UI.Enabled
-            elseif Window and Window.Toggle then
+            if Window and Window.Toggle then
                 Window:Toggle()
             end
         end
@@ -168,6 +170,7 @@ pcall(
 local CharModule = require(game.ReplicatedStorage.Modules.Core.Char)
 -- == Global Variables (Grouped by Feature) ==
 -- Silent Aim
+local enabled = false
 local SilentAimEnabled = false
 local SilentAimAttachEnabled = false
 local FOVRadius = 120
@@ -1047,6 +1050,7 @@ local function ForcePart(v)
             end
         end
         v.CanCollide = false
+        local Attachment1 = Instance.new("Attachment", HumanoidRootPart)
         local Torque = Instance.new("Torque", v)
         local AlignPosition = Instance.new("AlignPosition", v)
         local Attachment2 = Instance.new("Attachment", v)
