@@ -1,7 +1,8 @@
 -- ============================================================
---  BlockSpin Auto Farm GUI  v2.0
+--  BlockSpin Auto Farm GUI  v3.0  (Mobile + PC)
 --  LocalScript → StarterPlayerScripts
---  ✅ GUI เปิด/ปิด สวยงาม
+--  ✅ รองรับมือถือเต็มรูปแบบ (Touch Drag, Big Buttons)
+--  ✅ GUI เปิด/ปิด + ลากได้ทั้ง PC และมือถือ
 --  ✅ เดินไปสมัครงานยกกล่องอัตโนมัติ
 --  ✅ TweenService Smooth Movement
 -- ============================================================
@@ -18,6 +19,21 @@ local Humanoid    = Character:WaitForChild("Humanoid")
 local HRP         = Character:WaitForChild("HumanoidRootPart")
 
 -- ============================================================
+-- 📱  DETECT PLATFORM
+-- ============================================================
+local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+
+-- Responsive sizes
+local WIN_W   = isMobile and 300 or 260
+local WIN_H   = isMobile and 450 or 390
+local FONT_SM = isMobile and 13 or 11
+local FONT_MD = isMobile and 15 or 13
+local FONT_LG = isMobile and 17 or 15
+local ROW_H   = isMobile and 56 or 44
+local BTN_H   = isMobile and 58 or 46
+local TITLE_H = isMobile and 54 or 42
+
+-- ============================================================
 -- ⚙️  CONFIG
 -- ============================================================
 local CONFIG = {
@@ -27,11 +43,8 @@ local CONFIG = {
     PickupDelay    = 0.2,
     ScanInterval   = 0.8,
     ScanRadius     = 300,
-
-    -- ชื่อ NPC / Part ที่ใช้สมัครงาน (ปรับตามเกม)
     JobNPCKeywords = {"JobNPC", "register", "สมัคร", "Recruiter", "Manager", "job", "Worker", "Employer", "hire"},
     JobReachDist   = 4,
-
     ToggleKey      = Enum.KeyCode.RightShift,
     Debug          = false,
 }
@@ -39,13 +52,13 @@ local CONFIG = {
 -- ============================================================
 -- 🔌  STATE
 -- ============================================================
-local farmEnabled   = false
-local jobDone       = false   -- สมัครงานแล้วหรือยัง
-local isTweening    = false
-local moverBP       = nil
-local moverBG       = nil
-local timeoutTask   = nil
-local statsPickup   = 0
+local farmEnabled = false
+local jobDone     = false
+local isTweening  = false
+local moverBP     = nil
+local moverBG     = nil
+local timeoutTask = nil
+local statsPickup = 0
 
 -- ============================================================
 -- 🛠️  UTIL
@@ -62,7 +75,7 @@ local function destroyMovers()
     pcall(function() if moverBG then moverBG:Destroy() end end)
     moverBP, moverBG = nil, nil
     isTweening = false
-    if timeoutTask then task.cancel(timeoutTask) timeoutTask = nil end
+    if timeoutTask then task.cancel(timeoutTask); timeoutTask = nil end
 end
 
 local function matchName(name, keywords)
@@ -83,18 +96,18 @@ local function getPivotPos(obj)
 end
 
 -- ============================================================
--- 🏃  SMOOTH MOVE (BodyPosition + BodyGyro)
+-- 🏃  SMOOTH MOVE
 -- ============================================================
 local function smoothMoveTo(targetPos, onArrived)
     destroyMovers()
     isTweening = true
 
     moverBP = Instance.new("BodyPosition")
-    moverBP.MaxForce  = Vector3.new(9e4, 9e4, 9e4)
-    moverBP.P         = 8000
-    moverBP.D         = 800
-    moverBP.Position  = targetPos
-    moverBP.Parent    = HRP
+    moverBP.MaxForce = Vector3.new(9e4, 9e4, 9e4)
+    moverBP.P        = 8000
+    moverBP.D        = 800
+    moverBP.Position = targetPos
+    moverBP.Parent   = HRP
 
     moverBG = Instance.new("BodyGyro")
     moverBG.MaxTorque = Vector3.new(0, 9e4, 0)
@@ -107,32 +120,25 @@ local function smoothMoveTo(targetPos, onArrived)
     conn = RunService.Heartbeat:Connect(function()
         if not farmEnabled then destroyMovers(); conn:Disconnect(); return end
         if not HRP or not HRP.Parent then destroyMovers(); conn:Disconnect(); return end
-
-        -- อัปเดตทิศทางหันหน้าเสมอ
         if moverBG then
             moverBG.CFrame = CFrame.new(HRP.Position, Vector3.new(targetPos.X, HRP.Position.Y, targetPos.Z))
         end
-
         if distTo(targetPos) <= CONFIG.ReachDistance then
-            destroyMovers()
-            conn:Disconnect()
+            destroyMovers(); conn:Disconnect()
             if onArrived then task.spawn(onArrived) end
         end
     end)
 
-    -- timeout safety
     timeoutTask = task.delay(10, function()
         if conn.Connected then
-            destroyMovers()
-            conn:Disconnect()
-            log("⚠️ Timeout ข้ามเป้า")
+            destroyMovers(); conn:Disconnect()
             if onArrived then task.spawn(onArrived) end
         end
     end)
 end
 
 -- ============================================================
--- 📋  หา NPC สมัครงาน
+-- 📋  สมัครงาน
 -- ============================================================
 local function findJobNPC()
     for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -144,33 +150,18 @@ local function findJobNPC()
     return nil, nil
 end
 
--- ============================================================
--- 📋  สมัครงาน (Interact กับ NPC)
--- ============================================================
 local function registerJob(npc)
-    -- ProximityPrompt
     for _, d in ipairs(npc:GetDescendants()) do
-        if d:IsA("ProximityPrompt") then
-            pcall(function() fireproximityprompt(d) end)
-            log("✅ สมัครงานผ่าน ProximityPrompt")
-            return true
-        end
+        if d:IsA("ProximityPrompt") then pcall(function() fireproximityprompt(d) end); return true end
     end
-    -- ClickDetector
     for _, d in ipairs(npc:GetDescendants()) do
-        if d:IsA("ClickDetector") then
-            pcall(function() fireclickdetector(d) end)
-            log("✅ สมัครงานผ่าน ClickDetector")
-            return true
-        end
+        if d:IsA("ClickDetector") then pcall(function() fireclickdetector(d) end); return true end
     end
-    -- Touch
     local part = npc:IsA("BasePart") and npc or npc:FindFirstChildWhichIsA("BasePart")
     if part then
         pcall(function() firetouchinterest(HRP, part, 0) end)
         task.wait(0.1)
         pcall(function() firetouchinterest(HRP, part, 1) end)
-        log("✅ สมัครงานผ่าน Touch")
         return true
     end
     return false
@@ -227,55 +218,36 @@ end
 -- 🔁  FARM LOOP
 -- ============================================================
 local function farmLoop()
-    -- Step 1: สมัครงานก่อน (ถ้ายังไม่ได้ทำ)
     if not jobDone then
         local npc, npcPos = findJobNPC()
         if npc and npcPos then
-            log("🚶 เดินไปสมัครงาน...")
             smoothMoveTo(npcPos, function()
-                task.wait(0.3)
-                registerJob(npc)
-                task.wait(1)
-                jobDone = true
-                log("✅ สมัครงานเสร็จแล้ว เริ่มฟาร์ม!")
+                task.wait(0.3); registerJob(npc); task.wait(1); jobDone = true
             end)
-            -- รอจนสมัครงานเสร็จ
             local waited = 0
             while not jobDone and farmEnabled do
-                task.wait(0.5)
-                waited = waited + 0.5
-                if waited > 15 then
-                    jobDone = true  -- timeout บังคับข้าม
-                    break
-                end
+                task.wait(0.5); waited = waited + 0.5
+                if waited > 15 then jobDone = true; break end
             end
         else
-            log("⚠️ ไม่เจอ NPC สมัครงาน ข้ามไปฟาร์มเลย")
             jobDone = true
         end
     end
 
-    -- Step 2: ฟาร์มกล่อง
     while farmEnabled do
         task.wait(CONFIG.ScanInterval)
         if isTweening then continue end
-
         local box, dist = findNearestBox()
-        if not box then log("🔍 ไม่เจอกล่อง..."); continue end
-
+        if not box then continue end
         local pos = getPivotPos(box)
         if not pos then continue end
-
         if dist <= CONFIG.ReachDistance then
-            pickupBox(box)
-            task.wait(CONFIG.PickupDelay)
+            pickupBox(box); task.wait(CONFIG.PickupDelay)
         else
             local captured = box
             smoothMoveTo(pos, function()
                 task.wait(0.05)
-                if captured and captured.Parent then
-                    pickupBox(captured)
-                end
+                if captured and captured.Parent then pickupBox(captured) end
                 task.wait(CONFIG.PickupDelay)
             end)
         end
@@ -286,271 +258,381 @@ end
 -- 🎨  GUI
 -- ============================================================
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-
--- ลบ GUI เก่าถ้ามี
 pcall(function()
     local old = PlayerGui:FindFirstChild("BlockSpinFarmGUI")
     if old then old:Destroy() end
 end)
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "BlockSpinFarmGUI"
-ScreenGui.ResetOnSpawn = false
+ScreenGui.Name           = "BlockSpinFarmGUI"
+ScreenGui.ResetOnSpawn   = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.Parent = PlayerGui
+ScreenGui.IgnoreGuiInset = true  -- ✅ สำคัญบนมือถือ
+ScreenGui.Parent         = PlayerGui
 
 -- ── Main Window ──────────────────────────────────────────────
 local Main = Instance.new("Frame", ScreenGui)
-Main.Name = "Main"
-Main.Size = UDim2.fromOffset(260, 320)
-Main.Position = UDim2.new(0, 20, 0.5, -160)
+Main.Name             = "Main"
+Main.Size             = UDim2.fromOffset(WIN_W, WIN_H)
+Main.Position         = UDim2.new(0.5, -WIN_W/2, 0.5, -WIN_H/2)
 Main.BackgroundColor3 = Color3.fromRGB(13, 13, 20)
-Main.BorderSizePixel = 0
-Main.Active = true
-Main.Draggable = true
-Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 12)
+Main.BorderSizePixel  = 0
+Main.Active           = true
+Main.Draggable        = not isMobile  -- PC ใช้ built-in drag
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 14)
 
--- gradient bg
-local grad = Instance.new("UIGradient", Main)
-grad.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(18, 18, 30)),
+local mainGrad = Instance.new("UIGradient", Main)
+mainGrad.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(20, 20, 34)),
     ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 10, 18)),
 })
-grad.Rotation = 135
+mainGrad.Rotation = 135
 
--- border glow
-local stroke = Instance.new("UIStroke", Main)
-stroke.Color = Color3.fromRGB(0, 200, 100)
-stroke.Thickness = 1.2
-stroke.Transparency = 0.4
+local mainStroke = Instance.new("UIStroke", Main)
+mainStroke.Color        = Color3.fromRGB(0, 200, 100)
+mainStroke.Thickness    = 1.4
+mainStroke.Transparency = 0.35
+
+-- ✅ Mobile: manual touch drag
+if isMobile then
+    local dragging, dragStart, startPos = false, nil, nil
+    Main.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; dragStart = inp.Position; startPos = Main.Position
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(inp)
+        if dragging and inp.UserInputType == Enum.UserInputType.Touch then
+            local d = inp.Position - dragStart
+            Main.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + d.X,
+                startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.Touch then dragging = false end
+    end)
+end
 
 -- ── Title Bar ─────────────────────────────────────────────────
 local TitleBar = Instance.new("Frame", Main)
-TitleBar.Size = UDim2.new(1, 0, 0, 42)
+TitleBar.Size             = UDim2.new(1, 0, 0, TITLE_H)
 TitleBar.BackgroundColor3 = Color3.fromRGB(0, 160, 80)
-TitleBar.BorderSizePixel = 0
-Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 12)
+TitleBar.BorderSizePixel  = 0
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 14)
 
--- fix bottom corners of titlebar
 local titleFix = Instance.new("Frame", TitleBar)
-titleFix.Size = UDim2.new(1, 0, 0.5, 0)
-titleFix.Position = UDim2.new(0, 0, 0.5, 0)
+titleFix.Size             = UDim2.new(1, 0, 0.5, 0)
+titleFix.Position         = UDim2.new(0, 0, 0.5, 0)
 titleFix.BackgroundColor3 = Color3.fromRGB(0, 160, 80)
-titleFix.BorderSizePixel = 0
+titleFix.BorderSizePixel  = 0
 
-local TitleGrad = Instance.new("UIGradient", TitleBar)
-TitleGrad.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 210, 100)),
+local titleGrad = Instance.new("UIGradient", TitleBar)
+titleGrad.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 215, 105)),
     ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 140, 60)),
 })
-TitleGrad.Rotation = 90
+titleGrad.Rotation = 90
 
 local TitleLabel = Instance.new("TextLabel", TitleBar)
-TitleLabel.Size = UDim2.new(1, -50, 1, 0)
-TitleLabel.Position = UDim2.fromOffset(14, 0)
+TitleLabel.Size               = UDim2.new(1, -60, 1, 0)
+TitleLabel.Position           = UDim2.fromOffset(14, 0)
 TitleLabel.BackgroundTransparency = 1
-TitleLabel.Font = Enum.Font.GothamBold
-TitleLabel.TextSize = 15
-TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-TitleLabel.Text = "📦  BlockSpin Farm"
+TitleLabel.Font               = Enum.Font.GothamBold
+TitleLabel.TextSize           = FONT_LG
+TitleLabel.TextColor3         = Color3.white
+TitleLabel.TextXAlignment     = Enum.TextXAlignment.Left
+TitleLabel.Text               = "📦  BlockSpin Farm"
 
--- Close Button
+-- platform badge
+local platBadge = Instance.new("TextLabel", TitleBar)
+platBadge.Size               = UDim2.fromOffset(36, 18)
+platBadge.Position           = UDim2.new(1, isMobile and -80 or -72, 0.5, -9)
+platBadge.BackgroundColor3   = Color3.fromRGB(0, 100, 45)
+platBadge.BackgroundTransparency = 0.25
+platBadge.BorderSizePixel    = 0
+platBadge.Font               = Enum.Font.GothamBold
+platBadge.TextSize           = 9
+platBadge.TextColor3         = Color3.white
+platBadge.Text               = isMobile and "📱" or "🖥️"
+Instance.new("UICorner", platBadge).CornerRadius = UDim.new(0, 4)
+
+-- close button (ใหญ่กว่าบนมือถือ)
+local closeSz = isMobile and 38 or 26
 local CloseBtn = Instance.new("TextButton", TitleBar)
-CloseBtn.Size = UDim2.fromOffset(26, 26)
-CloseBtn.Position = UDim2.new(1, -34, 0.5, -13)
+CloseBtn.Size             = UDim2.fromOffset(closeSz, closeSz)
+CloseBtn.Position         = UDim2.new(1, -(closeSz + 8), 0.5, -closeSz/2)
 CloseBtn.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
-CloseBtn.BorderSizePixel = 0
-CloseBtn.Font = Enum.Font.GothamBold
-CloseBtn.TextSize = 13
-CloseBtn.TextColor3 = Color3.white
-CloseBtn.Text = "✕"
-Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
+CloseBtn.BorderSizePixel  = 0
+CloseBtn.Font             = Enum.Font.GothamBold
+CloseBtn.TextSize         = isMobile and 17 or 13
+CloseBtn.TextColor3       = Color3.white
+CloseBtn.Text             = "✕"
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 8)
 
 -- ── Body ──────────────────────────────────────────────────────
 local Body = Instance.new("Frame", Main)
-Body.Size = UDim2.new(1, -20, 1, -52)
-Body.Position = UDim2.fromOffset(10, 48)
+Body.Size                = UDim2.new(1, -20, 1, -(TITLE_H + 10))
+Body.Position            = UDim2.fromOffset(10, TITLE_H + 6)
 Body.BackgroundTransparency = 1
 
 local BodyLayout = Instance.new("UIListLayout", Body)
 BodyLayout.SortOrder = Enum.SortOrder.LayoutOrder
-BodyLayout.Padding = UDim.new(0, 8)
+BodyLayout.Padding   = UDim.new(0, isMobile and 9 or 7)
 
--- ── Helper: สร้าง Toggle Row ──────────────────────────────────
-local function createToggleRow(parent, icon, label, layoutOrder)
+-- ============================================================
+-- 🔧  HELPER: Toggle Row
+-- ============================================================
+local function createToggleRow(parent, icon, label, order)
     local row = Instance.new("Frame", parent)
-    row.Name = label
-    row.Size = UDim2.new(1, 0, 0, 44)
-    row.BackgroundColor3 = Color3.fromRGB(22, 22, 35)
-    row.BorderSizePixel = 0
-    row.LayoutOrder = layoutOrder
-    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
+    row.Name              = label
+    row.Size              = UDim2.new(1, 0, 0, ROW_H)
+    row.BackgroundColor3  = Color3.fromRGB(22, 22, 35)
+    row.BorderSizePixel   = 0
+    row.LayoutOrder       = order
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 10)
 
     local rowStroke = Instance.new("UIStroke", row)
-    rowStroke.Color = Color3.fromRGB(40, 40, 60)
+    rowStroke.Color     = Color3.fromRGB(40, 40, 60)
     rowStroke.Thickness = 1
 
+    -- ✅ Full-area invisible button (touch-friendly)
+    local hitArea = Instance.new("TextButton", row)
+    hitArea.Size                 = UDim2.fromScale(1, 1)
+    hitArea.BackgroundTransparency = 1
+    hitArea.Text                 = ""
+    hitArea.ZIndex               = 5
+
     local iconLbl = Instance.new("TextLabel", row)
-    iconLbl.Size = UDim2.fromOffset(30, 44)
-    iconLbl.Position = UDim2.fromOffset(8, 0)
+    iconLbl.Size                 = UDim2.fromOffset(32, ROW_H)
+    iconLbl.Position             = UDim2.fromOffset(10, 0)
     iconLbl.BackgroundTransparency = 1
-    iconLbl.Font = Enum.Font.Gotham
-    iconLbl.TextSize = 18
-    iconLbl.Text = icon
-    iconLbl.TextColor3 = Color3.white
+    iconLbl.Font                 = Enum.Font.Gotham
+    iconLbl.TextSize             = isMobile and 20 or 18
+    iconLbl.Text                 = icon
+    iconLbl.TextColor3           = Color3.white
+    iconLbl.ZIndex               = 2
 
     local textLbl = Instance.new("TextLabel", row)
-    textLbl.Size = UDim2.new(1, -90, 1, 0)
-    textLbl.Position = UDim2.fromOffset(40, 0)
+    textLbl.Size                 = UDim2.new(1, -96, 1, 0)
+    textLbl.Position             = UDim2.fromOffset(46, 0)
     textLbl.BackgroundTransparency = 1
-    textLbl.Font = Enum.Font.Gotham
-    textLbl.TextSize = 13
-    textLbl.TextColor3 = Color3.fromRGB(200, 200, 220)
-    textLbl.TextXAlignment = Enum.TextXAlignment.Left
-    textLbl.Text = label
+    textLbl.Font                 = Enum.Font.Gotham
+    textLbl.TextSize             = FONT_MD
+    textLbl.TextColor3           = Color3.fromRGB(200, 200, 220)
+    textLbl.TextXAlignment       = Enum.TextXAlignment.Left
+    textLbl.Text                 = label
+    textLbl.ZIndex               = 2
 
-    -- Toggle pill
+    -- Pill switch (ใหญ่ขึ้นบนมือถือ)
+    local pw  = isMobile and 54 or 44
+    local ph  = isMobile and 28 or 22
+    local psz = isMobile and 24 or 18
     local pillBg = Instance.new("Frame", row)
-    pillBg.Size = UDim2.fromOffset(44, 22)
-    pillBg.Position = UDim2.new(1, -52, 0.5, -11)
+    pillBg.Size             = UDim2.fromOffset(pw, ph)
+    pillBg.Position         = UDim2.new(1, -(pw + 8), 0.5, -ph/2)
     pillBg.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
-    pillBg.BorderSizePixel = 0
+    pillBg.BorderSizePixel  = 0
+    pillBg.ZIndex           = 3
     Instance.new("UICorner", pillBg).CornerRadius = UDim.new(1, 0)
 
     local pill = Instance.new("Frame", pillBg)
-    pill.Size = UDim2.fromOffset(18, 18)
-    pill.Position = UDim2.fromOffset(2, 2)
+    pill.Size             = UDim2.fromOffset(psz, psz)
+    pill.Position         = UDim2.fromOffset(2, (ph-psz)/2)
     pill.BackgroundColor3 = Color3.fromRGB(120, 120, 150)
-    pill.BorderSizePixel = 0
+    pill.BorderSizePixel  = 0
+    pill.ZIndex           = 4
     Instance.new("UICorner", pill).CornerRadius = UDim.new(1, 0)
 
-    -- state
-    local isOn = false
+    local isOn    = false
+    local onPos   = UDim2.fromOffset(pw - psz - 2, (ph-psz)/2)
+    local offPos  = UDim2.fromOffset(2, (ph-psz)/2)
+
     local function setState(on)
         isOn = on
-        local targetX = on and UDim2.fromOffset(24, 2) or UDim2.fromOffset(2, 2)
-        local targetColor = on and Color3.fromRGB(0, 210, 100) or Color3.fromRGB(50, 50, 70)
-        local pillColor = on and Color3.white or Color3.fromRGB(120, 120, 150)
-        TweenService:Create(pill, TweenInfo.new(0.18, Enum.EasingStyle.Quad), {Position = targetX, BackgroundColor3 = pillColor}):Play()
-        TweenService:Create(pillBg, TweenInfo.new(0.18, Enum.EasingStyle.Quad), {BackgroundColor3 = targetColor}):Play()
+        TweenService:Create(pill,   TweenInfo.new(0.18, Enum.EasingStyle.Quad),
+            {Position = on and onPos or offPos,
+             BackgroundColor3 = on and Color3.white or Color3.fromRGB(120, 120, 150)}):Play()
+        TweenService:Create(pillBg, TweenInfo.new(0.18, Enum.EasingStyle.Quad),
+            {BackgroundColor3 = on and Color3.fromRGB(0, 210, 100) or Color3.fromRGB(50, 50, 70)}):Play()
         textLbl.TextColor3 = on and Color3.fromRGB(240, 255, 240) or Color3.fromRGB(200, 200, 220)
-        rowStroke.Color = on and Color3.fromRGB(0, 180, 80) or Color3.fromRGB(40, 40, 60)
+        rowStroke.Color    = on and Color3.fromRGB(0, 180, 80) or Color3.fromRGB(40, 40, 60)
     end
 
-    row.InputBegan:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1 or
-           inp.UserInputType == Enum.UserInputType.Touch then
-            setState(not isOn)
-            row:FireCustomEvent("Toggled", isOn)
-        end
-    end)
+    -- ✅ MouseButton1Click + TouchTap
+    hitArea.MouseButton1Click:Connect(function() setState(not isOn) end)
+    hitArea.TouchTap:Connect(function() setState(not isOn) end)
 
-    return row, setState, function() return isOn end
+    return row, setState, function() return isOn end, hitArea
 end
 
--- ── Helper: สร้าง Status Row ──────────────────────────────────
-local function createStatusRow(parent, icon, label, layoutOrder)
+-- ============================================================
+-- 🔧  HELPER: Status Row
+-- ============================================================
+local function createStatusRow(parent, icon, label, order)
     local row = Instance.new("Frame", parent)
-    row.Size = UDim2.new(1, 0, 0, 34)
+    row.Size             = UDim2.new(1, 0, 0, isMobile and 40 or 34)
     row.BackgroundColor3 = Color3.fromRGB(16, 16, 26)
-    row.BorderSizePixel = 0
-    row.LayoutOrder = layoutOrder
-    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 7)
+    row.BorderSizePixel  = 0
+    row.LayoutOrder      = order
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
 
     local lbl = Instance.new("TextLabel", row)
-    lbl.Size = UDim2.new(1, -8, 1, 0)
-    lbl.Position = UDim2.fromOffset(8, 0)
+    lbl.Size                 = UDim2.new(1, -10, 1, 0)
+    lbl.Position             = UDim2.fromOffset(10, 0)
     lbl.BackgroundTransparency = 1
-    lbl.Font = Enum.Font.Gotham
-    lbl.TextSize = 12
-    lbl.TextColor3 = Color3.fromRGB(160, 160, 190)
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.Text = icon .. "  " .. label
-
+    lbl.Font                 = Enum.Font.Gotham
+    lbl.TextSize             = FONT_SM + 1
+    lbl.TextColor3           = Color3.fromRGB(160, 160, 190)
+    lbl.TextXAlignment       = Enum.TextXAlignment.Left
+    lbl.Text                 = icon .. "  " .. label
     return lbl
 end
 
--- ── Toggle Rows ───────────────────────────────────────────────
-local farmRow,    setFarmToggle,    getFarmState    = createToggleRow(Body, "🌾", "Auto Farm กล่อง", 1)
-local jobRow,     setJobToggle,     getJobState     = createToggleRow(Body, "📋", "เดินสมัครงาน", 2)
+-- ── Build Rows ────────────────────────────────────────────────
+local farmRow, setFarmToggle, getFarmState, farmHit = createToggleRow(Body, "🌾", "Auto Farm กล่อง", 1)
+local jobRow,  setJobToggle,  getJobState,  jobHit  = createToggleRow(Body, "📋", "เดินสมัครงาน",  2)
 
--- ── Divider ───────────────────────────────────────────────────
 local divider = Instance.new("Frame", Body)
-divider.Size = UDim2.new(1, 0, 0, 1)
+divider.Size             = UDim2.new(1, 0, 0, 1)
 divider.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
-divider.BorderSizePixel = 0
-divider.LayoutOrder = 3
+divider.BorderSizePixel  = 0
+divider.LayoutOrder      = 3
 
--- ── Status Labels ─────────────────────────────────────────────
-local statusLbl  = createStatusRow(Body, "⚡", "Status: ปิดอยู่", 4)
-local pickupLbl  = createStatusRow(Body, "📦", "ยกกล่อง: 0 ใบ", 5)
-local jobLbl     = createStatusRow(Body, "🏢", "สมัครงาน: ยังไม่ได้", 6)
+local statusLbl = createStatusRow(Body, "⚡", "Status: ปิดอยู่",     4)
+local pickupLbl = createStatusRow(Body, "📦", "ยกกล่อง: 0 ใบ",       5)
+local jobLbl    = createStatusRow(Body, "🏢", "สมัครงาน: ยังไม่ได้",  6)
 
--- ── Key Hint ──────────────────────────────────────────────────
-local hintLbl = Instance.new("TextLabel", Body)
-hintLbl.Size = UDim2.new(1, 0, 0, 22)
-hintLbl.BackgroundTransparency = 1
-hintLbl.Font = Enum.Font.Gotham
-hintLbl.TextSize = 11
-hintLbl.TextColor3 = Color3.fromRGB(80, 80, 110)
-hintLbl.Text = "กด RShift เพื่อเปิด/ปิดด่วน"
-hintLbl.LayoutOrder = 7
+-- ── START / STOP Button ───────────────────────────────────────
+local StartBtn = Instance.new("TextButton", Body)
+StartBtn.Size             = UDim2.new(1, 0, 0, BTN_H)
+StartBtn.BackgroundColor3 = Color3.fromRGB(0, 190, 90)
+StartBtn.BorderSizePixel  = 0
+StartBtn.Font             = Enum.Font.GothamBold
+StartBtn.TextSize         = FONT_LG
+StartBtn.TextColor3       = Color3.white
+StartBtn.Text             = "▶  เริ่มฟาร์ม"
+StartBtn.LayoutOrder      = 7
+Instance.new("UICorner", StartBtn).CornerRadius = UDim.new(0, 12)
 
--- ── Mini toggle button (เปิด window กลับมา) ──────────────────
+local btnGrad = Instance.new("UIGradient", StartBtn)
+btnGrad.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 230, 110)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 150, 65)),
+})
+btnGrad.Rotation = 90
+
+local btnStroke = Instance.new("UIStroke", StartBtn)
+btnStroke.Color        = Color3.fromRGB(0, 255, 120)
+btnStroke.Thickness    = 1.4
+btnStroke.Transparency = 0.45
+
+local shine = Instance.new("Frame", StartBtn)
+shine.Size                 = UDim2.new(1, 0, 0.45, 0)
+shine.BackgroundColor3     = Color3.white
+shine.BackgroundTransparency = 0.87
+shine.BorderSizePixel      = 0
+Instance.new("UICorner", shine).CornerRadius = UDim.new(0, 12)
+
+-- ── Hint (PC only) ────────────────────────────────────────────
+if not isMobile then
+    local hintLbl = Instance.new("TextLabel", Body)
+    hintLbl.Size                 = UDim2.new(1, 0, 0, 20)
+    hintLbl.BackgroundTransparency = 1
+    hintLbl.Font                 = Enum.Font.Gotham
+    hintLbl.TextSize             = 11
+    hintLbl.TextColor3           = Color3.fromRGB(80, 80, 110)
+    hintLbl.Text                 = "กด RShift เพื่อเปิด/ปิดด่วน"
+    hintLbl.LayoutOrder          = 8
+end
+
+-- ── Mini Button ───────────────────────────────────────────────
+local miniSz = isMobile and 58 or 44
 local MiniBtn = Instance.new("TextButton", ScreenGui)
-MiniBtn.Name = "MiniBtn"
-MiniBtn.Size = UDim2.fromOffset(44, 44)
-MiniBtn.Position = UDim2.new(0, 20, 0.5, -22)
+MiniBtn.Size             = UDim2.fromOffset(miniSz, miniSz)
+MiniBtn.Position         = UDim2.new(0, 16, 0.5, -miniSz/2)
 MiniBtn.BackgroundColor3 = Color3.fromRGB(0, 160, 80)
-MiniBtn.BorderSizePixel = 0
-MiniBtn.Font = Enum.Font.GothamBold
-MiniBtn.TextSize = 20
-MiniBtn.TextColor3 = Color3.white
-MiniBtn.Text = "📦"
-MiniBtn.Visible = false
-MiniBtn.Active = true
-MiniBtn.Draggable = true
-Instance.new("UICorner", MiniBtn).CornerRadius = UDim.new(0, 10)
+MiniBtn.BorderSizePixel  = 0
+MiniBtn.Font             = Enum.Font.GothamBold
+MiniBtn.TextSize         = isMobile and 26 or 20
+MiniBtn.TextColor3       = Color3.white
+MiniBtn.Text             = "📦"
+MiniBtn.Visible          = false
+MiniBtn.Active           = true
+MiniBtn.Draggable        = not isMobile
+Instance.new("UICorner", MiniBtn).CornerRadius = UDim.new(0, 12)
+local miniStroke = Instance.new("UIStroke", MiniBtn)
+miniStroke.Color        = Color3.fromRGB(0, 255, 120)
+miniStroke.Transparency = 0.4
 
--- pulse animation on miniBtn
+-- ✅ Mobile drag for MiniBtn
+if isMobile then
+    local d2, ds2, sp2 = false, nil, nil
+    MiniBtn.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.Touch then
+            d2 = true; ds2 = inp.Position; sp2 = MiniBtn.Position
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(inp)
+        if d2 and inp.UserInputType == Enum.UserInputType.Touch then
+            local dv = inp.Position - ds2
+            MiniBtn.Position = UDim2.new(sp2.X.Scale, sp2.X.Offset + dv.X, sp2.Y.Scale, sp2.Y.Offset + dv.Y)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.Touch then d2 = false end
+    end)
+end
+
 local pulseTween = TweenService:Create(MiniBtn,
     TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
     {BackgroundColor3 = Color3.fromRGB(0, 220, 110)}
 )
 
 -- ============================================================
--- 🔗  GUI LOGIC
+-- 🔗  LOGIC
 -- ============================================================
 local function updateStatus()
-    if farmEnabled then
-        statusLbl.Text = "⚡ Status: กำลังฟาร์ม..."
-        statusLbl.TextColor3 = Color3.fromRGB(100, 255, 140)
-    else
-        statusLbl.Text = "⚡ Status: ปิดอยู่"
-        statusLbl.TextColor3 = Color3.fromRGB(160, 160, 190)
-    end
-    pickupLbl.Text = "📦 ยกกล่อง: " .. statsPickup .. " ใบ"
-    jobLbl.Text = jobDone and "🏢 สมัครงาน: ✅ เสร็จแล้ว" or "🏢 สมัครงาน: ยังไม่ได้"
-    jobLbl.TextColor3 = jobDone
-        and Color3.fromRGB(100, 255, 140)
-        or Color3.fromRGB(255, 200, 80)
+    statusLbl.Text       = farmEnabled and "⚡ Status: กำลังฟาร์ม..." or "⚡ Status: ปิดอยู่"
+    statusLbl.TextColor3 = farmEnabled and Color3.fromRGB(100,255,140) or Color3.fromRGB(160,160,190)
+    pickupLbl.Text       = "📦 ยกกล่อง: " .. statsPickup .. " ใบ"
+    jobLbl.Text          = jobDone and "🏢 สมัครงาน: ✅ เสร็จแล้ว" or "🏢 สมัครงาน: ยังไม่ได้"
+    jobLbl.TextColor3    = jobDone and Color3.fromRGB(100,255,140) or Color3.fromRGB(255,200,80)
 end
 
--- อัปเดต stats ทุก 0.5 วินาที
-task.spawn(function()
-    while true do
-        task.wait(0.5)
-        updateStatus()
-    end
-end)
+task.spawn(function() while true do task.wait(0.5); updateStatus() end end)
 
--- Farm toggle callback
-farmRow.InputBegan:Connect(function(inp)
-    if inp.UserInputType ~= Enum.UserInputType.MouseButton1 and
-       inp.UserInputType ~= Enum.UserInputType.Touch then return end
-    task.wait(0.01) -- ให้ setState ทำงานก่อน
-    farmEnabled = getFarmState()
+local function updateStartBtn()
+    if farmEnabled then
+        StartBtn.Text = "⏹  หยุดฟาร์ม"
+        btnGrad.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(220,50,50)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(160,20,20)),
+        })
+        btnStroke.Color = Color3.fromRGB(255,80,80)
+        TweenService:Create(StartBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(200,40,40)}):Play()
+    else
+        StartBtn.Text = "▶  เริ่มฟาร์ม"
+        btnGrad.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(0,230,110)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(0,150,65)),
+        })
+        btnStroke.Color = Color3.fromRGB(0,255,120)
+        TweenService:Create(StartBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(0,190,90)}):Play()
+    end
+end
+
+-- ── toggleFarm ────────────────────────────────────────────────
+local function toggleFarm()
+    farmEnabled = not farmEnabled
+    setFarmToggle(farmEnabled)
+    updateStartBtn()
+    -- bounce animation
+    TweenService:Create(StartBtn, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+        {Size = UDim2.new(1, 0, 0, BTN_H - 6)}):Play()
+    task.wait(0.09)
+    TweenService:Create(StartBtn, TweenInfo.new(0.16, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+        {Size = UDim2.new(1, 0, 0, BTN_H)}):Play()
     if farmEnabled then
         Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
         Humanoid  = Character:WaitForChild("Humanoid")
@@ -560,56 +642,64 @@ farmRow.InputBegan:Connect(function(inp)
         destroyMovers()
     end
     updateStatus()
-end)
+end
 
--- Job toggle: reset jobDone เพื่อให้ไปสมัครใหม่
-jobRow.InputBegan:Connect(function(inp)
-    if inp.UserInputType ~= Enum.UserInputType.MouseButton1 and
-       inp.UserInputType ~= Enum.UserInputType.Touch then return end
+-- ✅ PC + Mobile
+StartBtn.MouseButton1Click:Connect(toggleFarm)
+StartBtn.TouchTap:Connect(toggleFarm)
+
+-- Farm pill
+local function onFarmToggle()
     task.wait(0.01)
-    if getJobState() then
-        jobDone = false
-        jobLbl.TextColor3 = Color3.fromRGB(255, 200, 80)
-    end
+    farmEnabled = getFarmState()
+    updateStartBtn()
+    if farmEnabled then
+        Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        Humanoid  = Character:WaitForChild("Humanoid")
+        HRP       = Character:WaitForChild("HumanoidRootPart")
+        task.spawn(farmLoop)
+    else destroyMovers() end
     updateStatus()
-end)
+end
+farmHit.MouseButton1Click:Connect(onFarmToggle)
+farmHit.TouchTap:Connect(onFarmToggle)
 
--- Close / Mini
-CloseBtn.MouseButton1Click:Connect(function()
+-- Job pill
+local function onJobToggle()
+    task.wait(0.01)
+    if getJobState() then jobDone = false end
+    updateStatus()
+end
+jobHit.MouseButton1Click:Connect(onJobToggle)
+jobHit.TouchTap:Connect(onJobToggle)
+
+-- ── Close / Open ──────────────────────────────────────────────
+local function closeWindow()
     TweenService:Create(Main, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-        {Size = UDim2.fromOffset(260, 0), BackgroundTransparency = 1}):Play()
+        {Size = UDim2.fromOffset(WIN_W, 0), BackgroundTransparency = 1}):Play()
     task.wait(0.22)
-    Main.Visible = false
-    MiniBtn.Visible = true
-    pulseTween:Play()
-end)
+    Main.Visible = false; MiniBtn.Visible = true; pulseTween:Play()
+end
+local function openWindow()
+    pulseTween:Cancel(); MiniBtn.Visible = false
+    Main.Visible = true; Main.Size = UDim2.fromOffset(WIN_W, 0); Main.BackgroundTransparency = 0
+    TweenService:Create(Main, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+        {Size = UDim2.fromOffset(WIN_W, WIN_H)}):Play()
+end
 
-MiniBtn.MouseButton1Click:Connect(function()
-    pulseTween:Cancel()
-    MiniBtn.Visible = false
-    Main.Visible = true
-    Main.Size = UDim2.fromOffset(260, 0)
-    TweenService:Create(Main, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-        {Size = UDim2.fromOffset(260, 320)}):Play()
-end)
+-- ✅ PC + Mobile
+CloseBtn.MouseButton1Click:Connect(closeWindow)
+CloseBtn.TouchTap:Connect(closeWindow)
+MiniBtn.MouseButton1Click:Connect(openWindow)
+MiniBtn.TouchTap:Connect(openWindow)
 
--- ── Keyboard Shortcut ────────────────────────────────────────
-UserInputService.InputBegan:Connect(function(input, gp)
-    if gp then return end
-    if input.KeyCode == CONFIG.ToggleKey then
-        farmEnabled = not farmEnabled
-        setFarmToggle(farmEnabled)
-        if farmEnabled then
-            Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-            Humanoid  = Character:WaitForChild("Humanoid")
-            HRP       = Character:WaitForChild("HumanoidRootPart")
-            task.spawn(farmLoop)
-        else
-            destroyMovers()
-        end
-        updateStatus()
-    end
-end)
+-- ── Keyboard (PC only) ────────────────────────────────────────
+if not isMobile then
+    UserInputService.InputBegan:Connect(function(input, gp)
+        if gp then return end
+        if input.KeyCode == CONFIG.ToggleKey then toggleFarm() end
+    end)
+end
 
 -- ============================================================
 -- ♻️  Character Respawn
@@ -618,17 +708,13 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     Character = char
     Humanoid  = char:WaitForChild("Humanoid")
     HRP       = char:WaitForChild("HumanoidRootPart")
-    isTweening = false
-    moverBP, moverBG = nil, nil
-    if farmEnabled then
-        task.wait(1.5)
-        task.spawn(farmLoop)
-    end
+    isTweening = false; moverBP, moverBG = nil, nil
+    if farmEnabled then task.wait(1.5); task.spawn(farmLoop) end
 end)
 
--- ── Open animation ───────────────────────────────────────────
-Main.Size = UDim2.fromOffset(260, 0)
-TweenService:Create(Main, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-    {Size = UDim2.fromOffset(260, 320)}):Play()
+-- ── Open Animation ────────────────────────────────────────────
+Main.Size = UDim2.fromOffset(WIN_W, 0)
+TweenService:Create(Main, TweenInfo.new(0.38, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+    {Size = UDim2.fromOffset(WIN_W, WIN_H)}):Play()
 
-print("📦 BlockSpin AutoFarm GUI โหลดแล้ว! | RShift = เปิด/ปิดด่วน")
+print("📦 BlockSpin AutoFarm v3.0 | " .. (isMobile and "📱 Mobile Mode" or "💻 PC Mode"))
