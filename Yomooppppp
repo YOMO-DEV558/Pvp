@@ -25,7 +25,7 @@ local isMobile = UserInputService.TouchEnabled and not UserInputService.Keyboard
 
 -- Responsive sizes
 local WIN_W   = isMobile and 300 or 260
-local WIN_H   = isMobile and 450 or 390
+local WIN_H   = isMobile and 480 or 390
 local FONT_SM = isMobile and 13 or 11
 local FONT_MD = isMobile and 15 or 13
 local FONT_LG = isMobile and 17 or 15
@@ -267,14 +267,14 @@ local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name           = "BlockSpinFarmGUI"
 ScreenGui.ResetOnSpawn   = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.IgnoreGuiInset = true  -- ✅ สำคัญบนมือถือ
+ScreenGui.IgnoreGuiInset = false
 ScreenGui.Parent         = PlayerGui
 
 -- ── Main Window ──────────────────────────────────────────────
 local Main = Instance.new("Frame", ScreenGui)
 Main.Name             = "Main"
 Main.Size             = UDim2.fromOffset(WIN_W, WIN_H)
-Main.Position         = UDim2.new(0.5, -WIN_W/2, 0.5, -WIN_H/2)
+Main.Position         = UDim2.new(0, 10, 0, 60)  -- safe position mobile
 Main.BackgroundColor3 = Color3.fromRGB(13, 13, 20)
 Main.BorderSizePixel  = 0
 Main.Active           = true
@@ -372,7 +372,8 @@ Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 8)
 
 -- ── Body ──────────────────────────────────────────────────────
 local Body = Instance.new("Frame", Main)
-Body.Size                = UDim2.new(1, -20, 1, -(TITLE_H + 10))
+local bodyH = WIN_H - TITLE_H - 18
+Body.Size                = UDim2.fromOffset(WIN_W - 20, bodyH)
 Body.Position            = UDim2.fromOffset(10, TITLE_H + 6)
 Body.BackgroundTransparency = 1
 
@@ -550,7 +551,7 @@ end
 local miniSz = isMobile and 58 or 44
 local MiniBtn = Instance.new("TextButton", ScreenGui)
 MiniBtn.Size             = UDim2.fromOffset(miniSz, miniSz)
-MiniBtn.Position         = UDim2.new(0, 16, 0.5, -miniSz/2)
+MiniBtn.Position         = UDim2.new(0, 16, 0, 70)  -- safe top-left on mobile
 MiniBtn.BackgroundColor3 = Color3.fromRGB(0, 160, 80)
 MiniBtn.BorderSizePixel  = 0
 MiniBtn.Font             = Enum.Font.GothamBold
