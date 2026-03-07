@@ -275,23 +275,23 @@ end
 -- 🎨  RAYFIELD UI
 -- ============================================================
 local Window = Rayfield:CreateWindow({
-    Name             = "BlockSpin Farm",
-    LoadingTitle     = "BlockSpin AutoFarm",
-    LoadingSubtitle  = "by YomoScript",
-    Theme            = "Default",        -- Default / Ocean / Amethyst / Green / Light / Red
+    Name                  = "BlockSpin Farm",
+    LoadingTitle          = "BlockSpin AutoFarm",
+    LoadingSubtitle       = "by YomoScript",
+    Theme                 = "Default",
     DisableRayfieldPrompts = false,
-    DisableBuildWarnings   = false,
-    ConfigurationSaving = {
-        Enabled  = true,
-        FolderName = "BlockSpinFarm",
-        FileName   = "Config",
+    DisableBuildWarnings  = false,
+    ConfigurationSaving   = {
+        Enabled    = false,
+        FolderName = nil,
+        FileName   = nil,
     },
-    Discord = { Enabled = false },
+    Discord  = { Enabled = false },
     KeySystem = { Enabled = false },
 })
 
 -- ── Tab: Farm ─────────────────────────────────────────────────
-local FarmTab = Window:CreateTab("🌾  ฟาร์ม", "box")
+local FarmTab = Window:CreateTab("🌾  ฟาร์ม", 4483345998)
 
 FarmTab:CreateSection("การฟาร์ม")
 
@@ -330,7 +330,7 @@ FarmTab:CreateButton({
 FarmTab:CreateToggle({
     Name     = "Auto Farm กล่อง",
     CurrentValue = false,
-    Flag     = "AutoFarm",
+    Flag = "AutoFarm",
     Callback = function(state)
         farmEnabled = state
         if state then
@@ -348,7 +348,7 @@ FarmTab:CreateToggle({
 FarmTab:CreateToggle({
     Name     = "เดินสมัครงานก่อนฟาร์ม",
     CurrentValue = false,
-    Flag     = "GoJob",
+    Flag = "GoJob",
     Callback = function(state)
         goJobEnabled = state
         if not state then
@@ -367,7 +367,7 @@ FarmTab:CreateSlider({
     Increment = 25,
     Suffix   = " studs",
     CurrentValue = CONFIG.ScanRadius,
-    Flag     = "ScanRadius",
+    Flag = "ScanRadius",
     Callback = function(val)
         CONFIG.ScanRadius = val
     end,
@@ -380,7 +380,7 @@ FarmTab:CreateSlider({
     Increment = 0.1,
     Suffix   = " วิ",
     CurrentValue = CONFIG.ScanInterval,
-    Flag     = "ScanSpeed",
+    Flag = "ScanSpeed",
     Callback = function(val)
         CONFIG.ScanInterval = val
     end,
@@ -393,14 +393,14 @@ FarmTab:CreateSlider({
     Increment = 1,
     Suffix   = " studs",
     CurrentValue = CONFIG.ReachDistance,
-    Flag     = "ReachDist",
+    Flag = "ReachDist",
     Callback = function(val)
         CONFIG.ReachDistance = val
     end,
 })
 
 -- ── Tab: สถานะ ────────────────────────────────────────────────
-local StatsTab = Window:CreateTab("📊  สถานะ", "bar-chart-2")
+local StatsTab = Window:CreateTab("📊  สถานะ", 4483345998)
 
 StatsTab:CreateSection("สถิติ")
 
@@ -439,7 +439,7 @@ StatsTab:CreateButton({
 })
 
 -- ── Tab: ตั้งค่า Keywords ─────────────────────────────────────
-local SettingsTab = Window:CreateTab("⚙️  ตั้งค่า", "settings")
+local SettingsTab = Window:CreateTab("⚙️  ตั้งค่า", 4483345998)
 
 SettingsTab:CreateSection("คีย์เวิร์ดกล่อง")
 
@@ -448,7 +448,6 @@ SettingsTab:CreateInput({
     CurrentValue = "Box,Crate,Chest,block",
     PlaceholderText = "เช่น Box,Crate,Chest",
     NumbersOnly = false,
-    Flag        = "BoxKeyword",
     Callback    = function(text)
         CONFIG.BoxKeywords = {}
         for kw in text:gmatch("[^,]+") do
@@ -473,7 +472,6 @@ SettingsTab:CreateInput({
     CurrentValue = "JobNPC,register,job,Worker",
     PlaceholderText = "เช่น JobNPC,Manager",
     NumbersOnly = false,
-    Flag        = "JobKeyword",
     Callback    = function(text)
         CONFIG.JobNPCKeywords = {}
         for kw in text:gmatch("[^,]+") do
@@ -492,7 +490,7 @@ SettingsTab:CreateInput({
 })
 
 -- ── Tab: เกี่ยวกับ ────────────────────────────────────────────
-local AboutTab = Window:CreateTab("ℹ️  เกี่ยวกับ", "info")
+local AboutTab = Window:CreateTab("ℹ️  เกี่ยวกับ", 4483345998)
 
 AboutTab:CreateSection("BlockSpin AutoFarm")
 
@@ -510,23 +508,32 @@ AboutTab:CreateParagraph({
 -- 🔄  STATS UPDATE LOOP
 -- ============================================================
 task.spawn(function()
+    local lastPickup = -1
+    local lastFarm   = nil
+    local lastJob    = nil
     while true do
         task.wait(0.5)
-        -- อัปเดต paragraph
-        pcall(function()
-            StatusParagraph:Set({
-                Title   = "⚡ สถานะ",
-                Content = farmEnabled and "🟢 กำลังฟาร์ม..." or "🔴 ปิดอยู่",
-            })
-            PickupParagraph:Set({
-                Title   = "📦 ยกกล่อง",
-                Content = statsPickup .. " ใบ",
-            })
-            JobParagraph:Set({
-                Title   = "🏢 สมัครงาน",
-                Content = jobDone and "✅ สมัครแล้ว" or "❌ ยังไม่ได้สมัคร",
-            })
-        end)
+        -- ใช้ pcall ป้องกัน error ถ้า Rayfield version ไม่มี Set()
+        local farmStr = farmEnabled and "🟢 กำลังฟาร์ม..." or "🔴 ปิดอยู่"
+        local jobStr  = jobDone and "✅ สมัครแล้ว" or "❌ ยังไม่ได้สมัคร"
+        if farmStr ~= lastFarm then
+            lastFarm = farmStr
+            pcall(function()
+                StatusParagraph:Set({ Title = "⚡ สถานะ", Content = farmStr })
+            end)
+        end
+        if statsPickup ~= lastPickup then
+            lastPickup = statsPickup
+            pcall(function()
+                PickupParagraph:Set({ Title = "📦 ยกกล่อง", Content = statsPickup .. " ใบ" })
+            end)
+        end
+        if jobStr ~= lastJob then
+            lastJob = jobStr
+            pcall(function()
+                JobParagraph:Set({ Title = "🏢 สมัครงาน", Content = jobStr })
+            end)
+        end
     end
 end)
 
