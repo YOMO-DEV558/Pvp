@@ -1,47 +1,27 @@
-ถนน-- =====================================================
--- yomo 🔫 | ULTRA | by mo
+-- =====================================================
+-- Silent Aim + WindUI 1.6.62 | by mo
 -- =====================================================
 
--- =========================
--- Services
--- =========================
-local Players            = game:GetService("Players")
-local RunService         = game:GetService("RunService")
-local ReplicatedStorage  = game:GetService("ReplicatedStorage")
-local UserInputService   = game:GetService("UserInputService")
-local TweenService       = game:GetService("TweenService")
-local Debris             = game:GetService("Debris")
-local Workspace          = game:GetService("Workspace")
-local ContextActionService = game:GetService("ContextActionService")
+local Players           = game:GetService("Players")
+local RunService        = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService      = game:GetService("TweenService")
+local Debris            = game:GetService("Debris")
+local Workspace         = game:GetService("Workspace")
+local UserInputService  = game:GetService("UserInputService")
 
--- =========================
--- Local Player & Character
--- =========================
-local LocalPlayer  = Players.LocalPlayer
-local Character    = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-local Humanoid     = Character:WaitForChild("Humanoid")
-local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
-local Camera       = Workspace.CurrentCamera
-local Mouse        = LocalPlayer:GetMouse()
-local isMobile     = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+local LocalPlayer   = Players.LocalPlayer
+local Character     = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local Camera        = Workspace.CurrentCamera
+local isMobile      = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
--- =========================
--- Remotes
--- =========================
-local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+-- Remote (BloxSpin)
 local Remote
 pcall(function()
-    Remote = Remotes:WaitForChild("Send", 5)
+    Remote = ReplicatedStorage:WaitForChild("Remotes", 10):WaitForChild("Send", 5)
 end)
 
--- =========================
--- Safe getgenv
--- =========================
-local getgenv = getgenv or function() return _G end
-
--- =========================
--- CounterTable (Remote Anti-Kick)
--- =========================
+-- CounterTable (ป้องกัน kick)
 local CounterTable
 pcall(function()
     for _, Obj in ipairs(getgc(true)) do
@@ -52,314 +32,188 @@ pcall(function()
     end
 end)
 
--- =========================
--- Modules
--- =========================
-local CharModule
-pcall(function()
-    CharModule = require(ReplicatedStorage.Modules.Core.Char)
-end)
+-- =====================================================
+-- STATE
+-- =====================================================
+local SilentEnabled   = false
+local WallShoot       = false
+local BulletTrail     = true
+local ShowFOV         = true
+local ShowTracer      = true
+local FOVRadius       = 150
+local CurrentTarget   = nil
+local SilentHooked    = false
+local SafeList        = {}
 
--- =========================
--- WindUI
--- =========================
-local WindUI = nil
+-- =====================================================
+-- WINDUI 1.6.62 (latest)
+-- =====================================================
+local WindUI
 pcall(function()
-    local Version = "1.6.53"
     WindUI = loadstring(game:HttpGet(
-        "https://github.com/Footagesus/WindUI/releases/download/" .. Version .. "/main.lua"
+        "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"
     ))()
 end)
 
 local Window
 if WindUI then
-    Window = WindUI:CreateWindow({
-        Title      = "yomo 🔫 | ULTRA",
-        Icon       = "zap",
-        Author     = "mo",
-        Folder     = "yomo_ultra",
-        Size       = UDim2.fromOffset(420, 220),
-        Theme      = "Dark",
-        Transparent = true,
-        Resizable  = true,
-        KeyCode    = Enum.KeyCode.G
-    })
-else
-    -- Fallback dummy window so no nil errors
-    local function dummyEl() return {Set=function()end, Register=function()end} end
-    Window = {
-        Tab = function() return {
-            Section=function()end, Toggle=function() return dummyEl() end,
-            Slider=function() return dummyEl() end, Button=function() return dummyEl() end,
-            Input=function() return dummyEl() end, Divider=function()end
-        } end,
-        ConfigManager = {CreateConfig = function() return {
-            Register=function()end, Save=function()end,
-            Delete=function()end, Load=function()end
-        } end}
-    }
+    local ok, w = pcall(function()
+        return WindUI:CreateWindow({
+            Title       = "Silent Aim",
+            Icon        = "crosshair",
+            Author      = "mo",
+            Folder      = "SilentAimMo",
+            Size        = UDim2.fromOffset(380, 200),
+            Theme       = "Dark",
+            Transparent = true,
+            Resizable   = true,
+            KeyCode     = Enum.KeyCode.RightControl,
+            -- 1.6.62: Topbar (Mac style)
+            Topbar      = true,
+        })
+    end)
+    if ok then Window = w end
 end
 
-local ConfigManager = Window.ConfigManager
-local myConfig = ConfigManager:CreateConfig("yomo_ultra_cfg")
-
--- =========================
--- Open/Close Button (Icon)
--- =========================
-local _sg = Instance.new("ScreenGui")
-_sg.Name = "yomoIconGui"
-_sg.ResetOnSpawn = false
-_sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-_sg.Parent = game.CoreGui
-
-local OpenIcon = Instance.new("ImageButton")
-OpenIcon.Size = UDim2.new(0, 48, 0, 48)
-OpenIcon.Position = UDim2.new(0.5, 0, 0, 36)
-OpenIcon.AnchorPoint = Vector2.new(0.5, 0)
-OpenIcon.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-OpenIcon.BackgroundTransparency = 0.15
-OpenIcon.Image = "rbxassetid://113631682317686"
-OpenIcon.ScaleType = Enum.ScaleType.Fit
-OpenIcon.Active = true
-OpenIcon.Draggable = true
-OpenIcon.Parent = _sg
-Instance.new("UICorner", OpenIcon).CornerRadius = UDim.new(1, 0)
-local _stroke = Instance.new("UIStroke", OpenIcon)
-_stroke.Color = Color3.fromRGB(0, 220, 100)
-_stroke.Thickness = 2
-
-OpenIcon.MouseButton1Click:Connect(function()
-    if Window and Window.Toggle then Window:Toggle()
-    elseif Window and Window.UI then Window.UI.Enabled = not Window.UI.Enabled end
-    TweenService:Create(OpenIcon, TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-        {Size = UDim2.new(0, 56, 0, 56)}):Play()
-    task.delay(0.2, function()
-        TweenService:Create(OpenIcon, TweenInfo.new(0.12), {Size = UDim2.new(0, 48, 0, 48)}):Play()
-    end)
-end)
-
--- ==========================================
--- VARIABLES
--- ==========================================
-
--- Silent Aim
-local SilentAimEnabled        = false
-local SilentAimAttachEnabled  = false
-local FOVRadius               = 120
-local CurrentTarget           = nil
-local SilentFOVCircle         = nil
-local SilentHooked            = false
-
--- ESP
-local espPlayers        = {}
-local boxESPEnabled     = false
-local nameESPEnabled    = false
-local distanceESPEnabled= false
-local healthESPEnabled  = false
-local highlightEnabled  = false
-local highlights        = {}
-local excludedPlayerNames = {}
-local ESPEnabled        = false
-local ESPConnection     = nil
-local BillboardCache    = {}
-
--- Movement
-local walkSpeedEnabled  = false
-local speedValue        = 16      -- WalkSpeed สุทธิ
-local FlyEnabled        = false
-local isFlyingUp        = false
-local floatPower        = 50
-local moveConn          = nil
-local flyJumpConn       = nil
-
--- Snap Under Map
-local featureEnabled    = false
-local teleportActive    = false
-local lockedY           = nil
-local maxHeight         = 10
-local startY            = nil
-local snapConn          = nil
-
--- Combat
-local fastFinishEnabled = false
-local hookEnabled       = false
-local scanRadius        = 12
-local scanInterval      = 0.08   -- เร็วขึ้น 12x จากเดิม 1s
-local holdTime          = 0.01   -- FinishPrompt กด instant
-local running           = false
-
--- Bring/Troll
-local SelectedPlayer    = nil
-local Active            = false
-local BringConnection   = nil
-
--- Auto Pickup
-local sucking           = false
-local lastPickupTimes   = {}
-
--- Downed
-local enabled           = false
-local flickering        = false
-local undergroundBaseCFrame = nil
-local DROP_DEPTH        = -55
-local MOVE_RADIUS       = 10
-local FLICKER_RATE      = 0.08
-
--- Misc
-local AutoSkipEnabled   = false
-local AutoRespawnEnabled= false
-local WallShootEnabled  = false
-local localEventCounter = 0
-local localFuncCounter  = 0
-
--- Weapon DB
-local RARITY_COLORS = {
-    Common   = Color3.fromRGB(200,200,200),
-    Uncommon = Color3.fromRGB(86,176,62),
-    Rare     = Color3.fromRGB(0,162,255),
-    Epic     = Color3.fromRGB(170,85,255),
-    Legendary= Color3.fromRGB(255,170,0),
-    Omega    = Color3.fromRGB(255,75,75)
-}
-local WeaponDB = {}
-
--- Tracer Drawing
-local Tracer = Drawing.new("Line")
-Tracer.Thickness  = 1.5
-Tracer.Color      = Color3.fromRGB(255, 50, 50)
-Tracer.Transparency = 1
-Tracer.Visible    = false
-
--- ==========================================
--- UTILITY FUNCTIONS
--- ==========================================
-
-local tu_unpack = table.unpack or unpack
+-- Dummy fallback ถ้า WindUI โหลดไม่ได้
+if not Window then
+    local function dEl() return {Set=function(_,_)end, SetTitle=function()end, SetDesc=function()end} end
+    local function dTab()
+        return {
+            Section = function(_,_) end,
+            Toggle  = function(_,_) return dEl() end,
+            Slider  = function(_,_) return dEl() end,
+            Button  = function(_,_) return dEl() end,
+            Input   = function(_,_) return dEl() end,
+            Divider = function(_) end,
+            Space   = function(_) end,
+        }
+    end
+    Window = {
+        Tab      = function(_,_) return dTab() end,
+        Toggle   = function() end,
+        Notify   = function() end,
+    }
+    WindUI = {Notify = function() end}
+end
 
 local function Notify(title, desc, dur)
-    if WindUI then
-        WindUI:Notify({Title = title, Description = desc or "", Duration = dur or 3})
-    end
+    pcall(function()
+        if WindUI and WindUI.Notify then
+            WindUI:Notify({Title=title, Description=desc or "", Duration=dur or 3})
+        end
+    end)
 end
 
-local function SafeCall(f, ...)
-    return pcall(f, ...)
+-- =====================================================
+-- FOV CIRCLE + TRACER
+-- =====================================================
+local FOVCircle, Tracer
+
+-- Guard Drawing API
+if not Drawing then
+    local function dummy()
+        return {Visible=false, From=Vector2.new(), To=Vector2.new(),
+                Color=Color3.new(), Thickness=1, Transparency=0,
+                Radius=100, Filled=false, NumSides=64,
+                Position=Vector2.new(), Text="", Size=14,
+                Center=false, Outline=false, Font=2,
+                Remove=function()end, Destroy=function()end}
+    end
+    Drawing = {new = function() return dummy() end}
+end
+
+if not isMobile then
+    FOVCircle = Drawing.new("Circle")
+    FOVCircle.Color        = Color3.fromRGB(0, 220, 100)
+    FOVCircle.Thickness    = 1.5
+    FOVCircle.NumSides     = 64
+    FOVCircle.Filled       = false
+    FOVCircle.Transparency = 0.4
+    FOVCircle.Radius       = FOVRadius
+    FOVCircle.Visible      = false
+end
+
+Tracer = Drawing.new("Line")
+Tracer.Thickness    = 1.5
+Tracer.Color        = Color3.fromRGB(255, 50, 50)
+Tracer.Transparency = 0
+Tracer.Visible      = false
+
+-- =====================================================
+-- UTILITY
+-- =====================================================
+local function isExcluded(name)
+    for _, n in ipairs(SafeList) do
+        if string.lower(name):find(string.lower(n)) then return true end
+    end
+    return false
 end
 
 local function getPing()
-    local ok, stats = pcall(function()
-        return LocalPlayer.PlayerGui:FindFirstChild("NetworkStats")
-    end)
-    if ok and stats then
-        local lbl = stats:FindFirstChild("PingLabel")
-        if lbl then
-            local n = tonumber(lbl.Text:match("%d+"))
-            return n and n/1000 or 0.05
+    local ok, ping = pcall(function()
+        local stats = LocalPlayer.PlayerGui:FindFirstChild("NetworkStats")
+        if stats then
+            local lbl = stats:FindFirstChild("PingLabel")
+            if lbl then
+                local n = tonumber(lbl.Text:match("%d+"))
+                return n and n/1000 or 0.05
+            end
         end
-    end
-    return 0.05
-end
-
-local function isPlayerExcluded(name)
-    for _, n in ipairs(excludedPlayerNames) do
-        if n ~= "" and string.find(string.lower(name), string.lower(n)) then return true end
-    end
-    return false
+        return 0.05
+    end)
+    return ok and ping or 0.05
 end
 
 local function getClosestTarget()
     local closest, shortest = nil, FOVRadius
     local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character then
-            local head = p.Character:FindFirstChild("Head")
-            local hum  = p.Character:FindFirstChild("Humanoid")
-            local hrp  = p.Character:FindFirstChild("HumanoidRootPart")
-            if head and hum and hum.Health > 0 and hrp then
-                local sp, onScreen = Camera:WorldToViewportPoint(head.Position)
-                if onScreen then
-                    local d = (Vector2.new(sp.X,sp.Y) - center).Magnitude
-                    if d <= FOVRadius and not isPlayerExcluded(p.Name) and d < shortest then
-                        shortest = d
-                        closest  = p
-                    end
-                end
-            end
-        end
+        if p == LocalPlayer or isExcluded(p.Name) then continue end
+        local char = p.Character
+        if not char then continue end
+        local head = char:FindFirstChild("Head")
+        local hum  = char:FindFirstChild("Humanoid")
+        if not head or not hum or hum.Health <= 0 then continue end
+        local sp, on = Camera:WorldToViewportPoint(head.Position)
+        if not on then continue end
+        local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+        if d < shortest then shortest = d; closest = p end
     end
     return closest
 end
 
--- Prediction ดีขึ้น: คำนวณ velocity + ping + gravity compensation
 local function predictPosition(head, hrp)
     if not head or not hrp then return head and head.Position or Vector3.zero end
-    local ping     = getPing()
-    local vel      = hrp.AssemblyLinearVelocity or hrp.Velocity or Vector3.zero
-    -- คำนวณ gravity offset ถ้าอยู่กลางอากาศ
-    local gravComp = Vector3.new(0, -workspace.Gravity * ping * ping * 0.5, 0)
-    return head.Position + (vel * ping * 1.25) + gravComp
+    local ping = getPing()
+    local vel  = hrp.AssemblyLinearVelocity or hrp.Velocity or Vector3.zero
+    local grav = Vector3.new(0, -workspace.Gravity * ping * ping * 0.5, 0)
+    return head.Position + (vel * ping * 1.25) + grav
 end
 
--- Wall check แบบใหม่ใช้ Raycast API ทันสมัย
-local function isBehindWallSA(fromPos, toPos, targetChar)
+local function isBehindWall(fromPos, toPos, targetChar)
     local params = RaycastParams.new()
     local ignore = {Camera}
     if LocalPlayer.Character then table.insert(ignore, LocalPlayer.Character) end
     if targetChar then table.insert(ignore, targetChar) end
     params.FilterDescendantsInstances = ignore
-    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterType  = Enum.RaycastFilterType.Exclude
     params.IgnoreWater = true
     local dir = toPos - fromPos
-    local res = Workspace:Raycast(fromPos, dir.Unit * dir.Magnitude, params)
+    local res = Workspace:Raycast(fromPos, dir.Unit * math.min(dir.Magnitude, 999), params)
     if res then return true, res.Instance, res.Position end
     return false, nil, nil
 end
 
--- CallRemote (ใช้ CounterTable เพื่อไม่โดน kick)
-local function CallRemote(remote, ...)
-    if not remote then return end
-    local args = {...}
-    if remote.ClassName == "RemoteEvent" then
-        if CounterTable and type(CounterTable.event) == "number" then
-            CounterTable.event = CounterTable.event + 1
-            SafeCall(function(...) remote:FireServer(CounterTable.event, ...) end, tu_unpack(args))
-        else
-            localEventCounter = localEventCounter + 1
-            SafeCall(function(...) remote:FireServer(localEventCounter, ...) end, tu_unpack(args))
-        end
-    elseif remote.ClassName == "RemoteFunction" then
-        if CounterTable and type(CounterTable.func) == "number" then
-            CounterTable.func = CounterTable.func + 1
-            local ok, r = SafeCall(function(...) return remote:InvokeServer(CounterTable.func, ...) end, tu_unpack(args))
-            return ok and r or nil
-        else
-            localFuncCounter = localFuncCounter + 1
-            local ok, r = SafeCall(function(...) return remote:InvokeServer(localFuncCounter, ...) end, tu_unpack(args))
-            return ok and r or nil
-        end
-    end
-end
-
-local function NetGet(...)
-    if not CounterTable then return end
-    CounterTable.func = (CounterTable.func or 0) + 1
-    local ok, res = pcall(function(...)
-        local GetRemote = Remotes:WaitForChild("Get")
-        return GetRemote:InvokeServer(CounterTable.func, ...)
-    end, ...)
-    return ok and res or nil
-end
-
--- ==========================================
--- 🟢 BULLET TRAIL EFFECT (เส้นสีเขียว)
--- ==========================================
+-- =====================================================
+-- 🟢 BULLET TRAIL
+-- =====================================================
 local function spawnBulletTrail(fromPos, toPos)
+    if not BulletTrail then return end
     task.spawn(function()
         pcall(function()
             local dist = (toPos - fromPos).Magnitude
             if dist < 0.1 then return end
-
-            -- เส้นหลัก
             local beam = Instance.new("Part")
             beam.Anchored    = true
             beam.CanCollide  = false
@@ -375,12 +229,11 @@ local function spawnBulletTrail(fromPos, toPos)
             }):Play()
             Debris:AddItem(beam, 0.2)
 
-            -- Impact glow
             local glow = Instance.new("Part")
             glow.Anchored    = true
             glow.CanCollide  = false
             glow.CastShadow  = false
-            glow.Size        = Vector3.new(0.5, 0.5, 0.5)
+            glow.Size        = Vector3.new(0.45, 0.45, 0.45)
             glow.Shape       = Enum.PartType.Ball
             glow.Material    = Enum.Material.Neon
             glow.Color       = Color3.fromRGB(0, 255, 80)
@@ -395,24 +248,25 @@ local function spawnBulletTrail(fromPos, toPos)
     end)
 end
 
--- ==========================================
--- 🎯 SILENT AIM — hookmetamethod (สมบูรณ์)
--- ==========================================
-local function SetupSilentAimHook()
+-- =====================================================
+-- 🎯 SILENT AIM HOOK
+-- =====================================================
+local function SetupHook()
     if SilentHooked then return end
     if not hookmetamethod then
-        warn("[SilentAim] hookmetamethod ไม่มี — executor ไม่รองรับ")
+        Notify("⚠️ SilentAim", "hookmetamethod ไม่มี — executor ไม่รองรับ", 5)
         return
     end
     SilentHooked = true
+    local _wrap = typeof(newcclosure) == "function" and newcclosure or function(f) return f end
 
     local ok, err = pcall(function()
         local oldNC
-        oldNC = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+        oldNC = hookmetamethod(game, "__namecall", _wrap(function(self, ...)
             local method = getnamecallmethod()
             local args   = {...}
 
-            if (SilentAimEnabled or SilentAimAttachEnabled)
+            if SilentEnabled
                 and method == "FireServer"
                 and self == Remote
                 and CurrentTarget
@@ -420,37 +274,31 @@ local function SetupSilentAimHook()
             then
                 pcall(function()
                     local char     = CurrentTarget.Character
-                    if not char then return end
                     local head     = char:FindFirstChild("Head")
                     local hrp      = char:FindFirstChild("HumanoidRootPart")
                     local humanoid = char:FindFirstChild("Humanoid")
-                    if not (head and hrp and humanoid) then return end
-                    if humanoid.Health <= 0 then return end
+                    if not (head and hrp and humanoid) or humanoid.Health <= 0 then return end
 
                     local myChar = LocalPlayer.Character
                     local myHead = myChar and myChar:FindFirstChild("Head")
                     local myHRP  = myChar and myChar:FindFirstChild("HumanoidRootPart")
                     if not (myHead and myHRP) then return end
 
-                    local myPos  = myHRP.Position
                     local aimPos = predictPosition(head, hrp)
+                    local isWall, wallPart, wallHitPos = isBehindWall(myHead.Position, aimPos, char)
 
-                    local isWall, wallPart, wallHitPos = isBehindWallSA(myHead.Position, aimPos, char)
-
-                    -- Redirect CFrame ยิง
                     if args[4] ~= nil then
                         args[4] = CFrame.new(math.huge, math.huge, math.huge)
                     end
                     if args[5] ~= nil then
-                        if isWall and WallShootEnabled and wallPart then
+                        if isWall and WallShoot and wallPart then
                             args[5] = {[1]={[1]={Instance=wallPart, Normal=Vector3.new(0,1,0), Position=wallHitPos}}}
                         else
                             args[5] = {[1]={[1]={Instance=head, Normal=Vector3.new(0,1,0), Position=aimPos}}}
                         end
                     end
 
-                    -- 🟢 เส้นสีเขียวพุ่ง
-                    spawnBulletTrail(myPos, aimPos)
+                    spawnBulletTrail(myHRP.Position, aimPos)
                 end)
             end
 
@@ -459,1196 +307,160 @@ local function SetupSilentAimHook()
     end)
 
     if not ok then
-        warn("[SilentAim] hook ล้มเหลว:", err)
-    end
-end
-
-SetupSilentAimHook()
-
--- ==========================================
--- CHARACTER SETUP
--- ==========================================
-local function setupCharacter(char)
-    Character      = char
-    Humanoid       = char:WaitForChild("Humanoid")
-    HumanoidRootPart = char:WaitForChild("HumanoidRootPart")
-
-    -- Reset Snap
-    teleportActive = false
-    lockedY        = nil
-    featureEnabled = false
-
-    -- moveConn: WalkSpeed ล้วน (ไม่ยุ่ง CFrame)
-    if moveConn then pcall(function() moveConn:Disconnect() end) end
-    moveConn = RunService.Heartbeat:Connect(function()
-        if not Humanoid then return end
-        if walkSpeedEnabled then
-            Humanoid.WalkSpeed = speedValue
-        else
-            if Humanoid.WalkSpeed ~= 16 then
-                Humanoid.WalkSpeed = 16
-            end
-        end
-    end)
-end
-
-LocalPlayer.CharacterAdded:Connect(function(char)
-    task.wait(0.5)
-    setupCharacter(char)
-end)
-if LocalPlayer.Character then
-    setupCharacter(LocalPlayer.Character)
-end
-
--- ==========================================
--- SNAP UNDER MAP — Y-Lock (ไม่ซ้ำ, ไม่ ghost)
--- ==========================================
-local function startSnapLock()
-    if snapConn then pcall(function() snapConn:Disconnect() end) end
-    snapConn = RunService.Heartbeat:Connect(function()
-        if not teleportActive or not lockedY then return end
-        if not HumanoidRootPart then return end
-        local p = HumanoidRootPart.Position
-        if math.abs(p.Y - lockedY) > 0.05 then
-            HumanoidRootPart.CFrame = CFrame.new(p.X, lockedY, p.Z)
-        end
-    end)
-end
-
-local function performSnap()
-    if not HumanoidRootPart then return end
-    startY = HumanoidRootPart.Position.Y
-    local bottomY = startY - maxHeight
-    HumanoidRootPart.CFrame = CFrame.new(HumanoidRootPart.Position.X, bottomY, HumanoidRootPart.Position.Z)
-    lockedY = bottomY
-end
-
-local function stopSnap()
-    teleportActive = false
-    lockedY        = nil
-    startY         = nil
-end
-
--- Z key toggle
-UserInputService.InputBegan:Connect(function(input, gp)
-    if gp then return end
-    if input.KeyCode == Enum.KeyCode.Z and featureEnabled then
-        teleportActive = not teleportActive
-        if teleportActive then
-            performSnap()
-        else
-            stopSnap()
-        end
-    end
-end)
-
-startSnapLock()
-
--- ==========================================
--- DOWNED FLICKER (Ghost Exploit)
--- ==========================================
-local function isDowned()
-    if not CharModule then return false end
-    local ok, hum = pcall(function() return CharModule.get_hum() end)
-    if not ok or not hum then return false end
-    return hum:GetAttribute("HasBeenDowned") or hum:GetAttribute("IsDead") or hum.Health <= 0
-end
-
-local function getHRP()
-    if not CharModule then return HumanoidRootPart end
-    local ok, char = pcall(function() return CharModule.current_char.get() end)
-    if not ok or not char then return HumanoidRootPart end
-    return char:FindFirstChild("HumanoidRootPart")
-end
-
-local function teleportUnderground()
-    local hrp = getHRP()
-    if not hrp then return end
-    undergroundBaseCFrame = hrp.CFrame + Vector3.new(0, DROP_DEPTH, 0)
-    hrp.CFrame = undergroundBaseCFrame
-end
-
-local function flickerAndMove()
-    if flickering then return end
-    flickering = true
-    task.spawn(function()
-        while flickering and enabled and isDowned() do
-            local hrp = getHRP()
-            if hrp and undergroundBaseCFrame then
-                local angle  = math.random() * math.pi * 2
-                local offset = Vector3.new(math.cos(angle), 0, math.sin(angle)) * MOVE_RADIUS
-                hrp.CFrame   = CFrame.new(undergroundBaseCFrame.Position + offset)
-                task.wait(0.05)
-                hrp.CFrame   = undergroundBaseCFrame
-            end
-            task.wait(FLICKER_RATE)
-        end
-        flickering = false
-    end)
-end
-
--- ==========================================
--- HIT AURA (Auto Melee)
--- ==========================================
-local function getActiveTool()
-    local char = LocalPlayer.Character
-    if char then
-        for _, item in ipairs(char:GetChildren()) do
-            if item:IsA("Tool") then return item end
-        end
-    end
-    local bp = LocalPlayer:FindFirstChild("Backpack")
-    if bp then
-        for _, item in ipairs(bp:GetChildren()) do
-            if item:IsA("Tool") then return item end
-        end
-    end
-end
-
-local function getPlayersInRange(radius)
-    local res = {}
-    local char = LocalPlayer.Character
-    if not char or not char.PrimaryPart then return res end
-    local pos = char.PrimaryPart.Position
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character and p.Character.PrimaryPart then
-            local ok, mag = pcall(function()
-                return (p.Character.PrimaryPart.Position - pos).Magnitude
-            end)
-            if ok and mag and mag <= radius then
-                table.insert(res, p)
-            end
-        end
-    end
-    return res
-end
-
-local function AttackNearby()
-    if not Remote then return end
-    local char = LocalPlayer.Character
-    if not char or not char.PrimaryPart then return end
-    local tool = getActiveTool()
-    if not tool or tool.Parent ~= LocalPlayer.Character then return end
-    local targets = getPlayersInRange(scanRadius)
-    for _, target in pairs(targets) do
-        if target.Character and target.Character.PrimaryPart then
-            local ok1, lPos = pcall(function() return LocalPlayer.Character.PrimaryPart.Position end)
-            local ok2, ePos = pcall(function() return target.Character.PrimaryPart.Position end)
-            if ok1 and ok2 then
-                pcall(function()
-                    CallRemote(Remote, "melee_attack", tool, {target}, CFrame.lookAt(lPos, ePos), 0.75)
-                end)
-            end
-        end
-    end
-end
-
-local function StartAutoAttack()
-    if running then return end
-    running = true
-    task.spawn(function()
-        while running do
-            task.wait(scanInterval)
-            if hookEnabled and LocalPlayer.Character and LocalPlayer.Character.PrimaryPart then
-                pcall(AttackNearby)
-            end
-        end
-    end)
-end
-
--- ==========================================
--- AUTO PICKUP
--- ==========================================
-local function CheckAndPickup()
-    if not sucking then return end
-    local dropped = Workspace:FindFirstChild("DroppedItems")
-    if not dropped or not HumanoidRootPart then return end
-    for _, item in ipairs(dropped:GetChildren()) do
-        if item:IsA("Model") then
-            local ok, cf = pcall(function()
-                return item:GetPivot and item:GetPivot() or item:GetModelCFrame()
-            end)
-            if ok then
-                local dist = (HumanoidRootPart.Position - cf.Position).Magnitude
-                if dist <= 20 then
-                    local now = tick()
-                    if now - (lastPickupTimes[item] or 0) >= 0.3 then
-                        pcall(function() NetGet("pickup_dropped_item", item) end)
-                        lastPickupTimes[item] = now
-                    end
-                end
-            end
-        end
-    end
-end
-
--- ==========================================
--- FAST FINISH PROMPTS
--- ==========================================
-local function setFinishPrompt(prompt)
-    if prompt and prompt:IsA("ProximityPrompt") then
-        prompt.HoldDuration = 0         -- instant
-        prompt.MaxActivationDistance = 30
-        prompt.RequiresLineOfSight = false
-    end
-end
-
-local function findAndTriggerPrompts()
-    for _, char in pairs(Workspace:GetChildren()) do
-        local player = Players:GetPlayerFromCharacter(char)
-        if player and not isPlayerExcluded(player.Name) then
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                local prompt = hrp:FindFirstChild("FinishPrompt")
-                if prompt then
-                    setFinishPrompt(prompt)
-                    pcall(function()
-                        if prompt.InputHoldBegin then prompt:InputHoldBegin() end
-                        task.wait(0.01)
-                        if prompt.InputHoldEnd then prompt:InputHoldEnd() end
-                    end)
-                end
-            end
-        end
-    end
-end
-
-local function setupFastFinish(p)
-    if p == LocalPlayer then return end
-    local function onChar(char)
-        char.DescendantAdded:Connect(function(desc)
-            if fastFinishEnabled and desc:IsA("ProximityPrompt") and desc.Name == "FinishPrompt" then
-                setFinishPrompt(desc)
-            end
-        end)
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if hrp and fastFinishEnabled then
-            local pr = hrp:FindFirstChild("FinishPrompt")
-            if pr then setFinishPrompt(pr) end
-        end
-    end
-    p.CharacterAdded:Connect(onChar)
-    if p.Character then onChar(p.Character) end
-end
-
--- ==========================================
--- BRING / TROLL
--- ==========================================
-local _folder = Instance.new("Folder", Workspace)
-local _corePart = Instance.new("Part", _folder)
-local _attach1  = Instance.new("Attachment", _corePart)
-_corePart.Anchored   = true
-_corePart.CanCollide = false
-_corePart.Transparency = 1
-
-local function getPlayer(name)
-    name = string.lower(name)
-    for _, p in ipairs(Players:GetPlayers()) do
-        if string.find(string.lower(p.Name), name) or string.find(string.lower(p.DisplayName), name) then
-            return p
-        end
-    end
-end
-
-local function ForcePart(v)
-    if not v:IsA("BasePart") then return end
-    if v.Anchored or v.Parent:FindFirstChildOfClass("Humanoid") or v.Name == "Handle" then return end
-    for _, obj in ipairs(v:GetChildren()) do
-        if obj:IsA("BodyMover") or obj:IsA("RocketPropulsion") then obj:Destroy() end
-    end
-    v.CanCollide = false
-    local att = Instance.new("Attachment", v)
-    local ap  = Instance.new("AlignPosition", v)
-    ap.MaxForce = math.huge
-    ap.MaxVelocity = math.huge
-    ap.Responsiveness = 9999
-    ap.Attachment0 = att
-    ap.Attachment1 = _attach1
-end
-
-local function ToggleBring(name)
-    local player = getPlayer(name)
-    if not player then return end
-    Active = not Active
-    if Active then
-        local char = player.Character or player.CharacterAdded:Wait()
-        local targetHRP = char:WaitForChild("HumanoidRootPart")
-        for _, v in ipairs(Workspace:GetDescendants()) do ForcePart(v) end
-        BringConnection = Workspace.DescendantAdded:Connect(ForcePart)
-        task.spawn(function()
-            while Active do
-                _attach1.WorldCFrame = targetHRP.CFrame
-                task.wait()
-            end
-        end)
+        Notify("❌ Hook Error", tostring(err), 5)
     else
-        if BringConnection then BringConnection:Disconnect() end
+        Notify("✅ Silent Aim", "hook สำเร็จ", 2)
     end
 end
 
--- ==========================================
--- SKIP CRATE
--- ==========================================
-local function TrySkipCrate()
-    pcall(function()
-        local CC = require(ReplicatedStorage.Modules.Game.CrateSystem.Crate)
-        if CC and CC.spinning and CC.spinning.get() then CC.skip_spin() end
-    end)
-end
+SetupHook()
 
-local function SetupAutoSkip()
-    local send = Remotes:FindFirstChild("Send")
-    if send then
-        send.OnClientEvent:Connect(function()
-            if AutoSkipEnabled then task.spawn(TrySkipCrate) end
-        end)
-    end
-end
-
--- ==========================================
--- ESP SYSTEM
--- ==========================================
-local function createHighlight(character)
-    if not character then return nil end
-    local h = Instance.new("Highlight")
-    h.FillColor          = Color3.fromRGB(200, 0, 255)
-    h.OutlineColor       = Color3.fromRGB(255, 255, 255)
-    h.FillTransparency   = 0.3
-    h.OutlineTransparency= 0
-    h.Parent             = character
-    return h
-end
-
-local function updateHighlights()
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character then
-            if not highlights[p] or not highlights[p].Parent then
-                highlights[p] = createHighlight(p.Character)
-            end
-        end
-    end
-    for p, hl in pairs(highlights) do
-        if not p or not p.Parent or not p.Character then
-            pcall(function() hl:Destroy() end)
-            highlights[p] = nil
-        end
-    end
-end
-
-local function registerItems(folder)
-    for _, tool in ipairs(folder:GetChildren()) do
-        local key
-        local handle = tool:FindFirstChild("Handle")
-        if handle then
-            local mesh = handle:FindFirstChildOfClass("SpecialMesh")
-            if mesh then key = mesh.MeshId..(mesh.TextureId or "")
-            elseif handle:IsA("MeshPart") then key = handle.MeshId..(handle.TextureID or "") end
-        end
-        local entry = {
-            Name    = tool:GetAttribute("DisplayName") or tool.Name,
-            Rarity  = tool:GetAttribute("RarityName") or "Common",
-            ImageId = tool:GetAttribute("ImageId") or "rbxassetid://7072725737"
-        }
-        WeaponDB[key or tool.Name] = entry
-    end
-end
-
-local function getWeaponInfo(tool)
-    local handle = tool:FindFirstChild("Handle")
-    if handle then
-        local mesh = handle:FindFirstChildOfClass("SpecialMesh")
-        local key  = mesh and (mesh.MeshId..(mesh.TextureId or ""))
-               or (handle:IsA("MeshPart") and handle.MeshId..(handle.TextureID or ""))
-        if key and WeaponDB[key] then return WeaponDB[key] end
-    end
-    return WeaponDB[tool.Name]
-end
-
-local function createBillboardForPlayer(player)
-    if not ESPEnabled or player == LocalPlayer then return end
-    local char = player.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    if BillboardCache[player] then BillboardCache[player]:Destroy() end
-    local bb = Instance.new("BillboardGui")
-    bb.Adornee      = hrp
-    bb.Size         = UDim2.new(0, 90, 0, 20)
-    bb.StudsOffset  = Vector3.new(0, -5, 0)
-    bb.AlwaysOnTop  = true
-    bb.Parent       = char
-    local layout = Instance.new("UIListLayout", bb)
-    layout.FillDirection         = Enum.FillDirection.Horizontal
-    layout.HorizontalAlignment   = Enum.HorizontalAlignment.Center
-    layout.Padding               = UDim.new(0, 4)
-    local tools = {}
-    for _, cont in ipairs({"Backpack"}) do
-        local obj = player:FindFirstChild(cont)
-        if obj then for _, t in ipairs(obj:GetChildren()) do
-            if t:IsA("Tool") and t.Name ~= "Fists" then table.insert(tools, t) end
-        end end
-    end
-    if char then for _, t in ipairs(char:GetChildren()) do
-        if t:IsA("Tool") and t.Name ~= "Fists" then table.insert(tools, t) end
-    end end
-    for _, tool in ipairs(tools) do
-        local info = getWeaponInfo(tool)
-        if info then
-            local img = Instance.new("ImageLabel", bb)
-            img.Size = UDim2.new(0, 20, 0, 20)
-            img.BackgroundTransparency = 0.1
-            img.Image = info.ImageId
-            img.BackgroundColor3 = Color3.fromRGB(240, 248, 255)
-            Instance.new("UICorner", img).CornerRadius = UDim.new(0, 10)
-            local stroke = Instance.new("UIStroke", img)
-            stroke.Color = RARITY_COLORS[info.Rarity] or Color3.new(1,1,1)
-            stroke.Thickness = 2
-        end
-    end
-    BillboardCache[player] = bb
-end
-
-local function createESP(player)
-    if espPlayers[player] then return end
-    local lines = {}
-    for i = 1, 12 do
-        local l = Drawing.new("Line")
-        l.Color = Color3.new(1,1,1)
-        l.Thickness = 2
-        l.Visible = false
-        lines[i] = l
-    end
-    local nameText = Drawing.new("Text")
-    nameText.Size    = 14
-    nameText.Center  = true
-    nameText.Outline = true
-    nameText.Font    = 2
-    nameText.Color   = Color3.fromRGB(255,255,255)
-
-    local distText = Drawing.new("Text")
-    distText.Size    = 12
-    distText.Center  = true
-    distText.Outline = true
-    distText.Color   = Color3.fromRGB(255,255,200)
-
-    local hBg = Drawing.new("Square")
-    hBg.Filled = false; hBg.Thickness = 1; hBg.Visible = false
-    hBg.Color  = Color3.new(0,0,0)
-
-    local hFg = Drawing.new("Square")
-    hFg.Filled = true; hFg.Visible = false
-
-    local hl = Instance.new("Highlight")
-    hl.FillColor          = Color3.fromRGB(255,0,255)
-    hl.OutlineColor       = Color3.fromRGB(255,0,255)
-    hl.FillTransparency   = 1
-    hl.OutlineTransparency= 0
-    hl.DepthMode          = Enum.HighlightDepthMode.AlwaysOnTop
-    hl.Enabled            = false
-    pcall(function() hl.Parent = player.Character or Workspace end)
-
-    local drawings = {nameText, distText, hBg, hFg, hl}
-    for _, ln in ipairs(lines) do table.insert(drawings, ln) end
-
-    local EDGES = {{1,2},{1,3},{1,5},{2,4},{2,6},{3,4},{3,7},{4,8},{5,6},{5,7},{6,8},{7,8}}
-    local conn = RunService.RenderStepped:Connect(function()
-        if not player or not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
-            for _, ln in ipairs(lines) do ln.Visible = false end
-            nameText.Visible = false; distText.Visible = false
-            hBg.Visible = false; hFg.Visible = false; hl.Enabled = false
-            return
-        end
-        if hl and hl.Parent then hl.Adornee = player.Character end
-        local hrp    = player.Character.HumanoidRootPart
-        local humanoid = player.Character:FindFirstChild("Humanoid")
-        local dist   = 0
-        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-            dist = (hrp.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
-        end
-        local thick = math.clamp(500 / math.max(dist, 1), 0.5, 2)
-        local cf    = player.Character:GetPivot()
-        local sz    = Vector3.new(3.5, 7, 2)
-        local hs    = sz / 2
-        local corners = {
-            cf*Vector3.new(-hs.X,-hs.Y,-hs.Z), cf*Vector3.new(-hs.X,-hs.Y, hs.Z),
-            cf*Vector3.new(-hs.X, hs.Y,-hs.Z), cf*Vector3.new(-hs.X, hs.Y, hs.Z),
-            cf*Vector3.new( hs.X,-hs.Y,-hs.Z), cf*Vector3.new( hs.X,-hs.Y, hs.Z),
-            cf*Vector3.new( hs.X, hs.Y,-hs.Z), cf*Vector3.new( hs.X, hs.Y, hs.Z)
-        }
-        local vp = {}
-        local minX,maxX,minY,maxY = math.huge,-math.huge,math.huge,-math.huge
-        local hasFront = false
-        for i, w in ipairs(corners) do
-            local sp, on = Camera:WorldToViewportPoint(w)
-            vp[i] = {pos=sp, on=on}
-            if on and sp.Z > 0 then
-                hasFront = true
-                minX=math.min(minX,sp.X); maxX=math.max(maxX,sp.X)
-                minY=math.min(minY,sp.Y); maxY=math.max(maxY,sp.Y)
-            end
-        end
-        if not hasFront then
-            for _,ln in ipairs(lines) do ln.Visible=false end
-            nameText.Visible=false; distText.Visible=false
-            hBg.Visible=false; hFg.Visible=false; hl.Enabled=false
-            return
-        end
-        local width   = maxX - minX
-        local centerX = (minX+maxX)/2
-        local boxColor = Color3.new(1,1,1)
-        if humanoid and humanoid.Health > 0 then
-            local perc = humanoid.Health / (humanoid.MaxHealth > 0 and humanoid.MaxHealth or 1)
-            boxColor = Color3.fromHSV(perc*0.333, 0.5, 1)
-        end
-        if boxESPEnabled then
-            for i, edge in ipairs(EDGES) do
-                local a,b = vp[edge[1]], vp[edge[2]]
-                if a and b and a.on and b.on then
-                    lines[i].From = Vector2.new(a.pos.X,a.pos.Y)
-                    lines[i].To   = Vector2.new(b.pos.X,b.pos.Y)
-                    lines[i].Color= boxColor; lines[i].Thickness=thick; lines[i].Visible=true
-                else lines[i].Visible=false end
-            end
-        else
-            for _,ln in ipairs(lines) do ln.Visible=false end
-        end
-        local topY = minY
-        if healthESPEnabled and humanoid and humanoid.Health > 0 then
-            local perc = humanoid.Health / (humanoid.MaxHealth > 0 and humanoid.MaxHealth or 1)
-            local bh = 4; local bw = math.max(width, 50)
-            local bx = width < 50 and centerX-25 or minX
-            hBg.Position=Vector2.new(bx,topY-bh-2); hBg.Size=Vector2.new(bw,bh); hBg.Visible=true
-            hFg.Position=Vector2.new(bx,topY-bh-2); hFg.Size=Vector2.new(bw*perc,bh)
-            hFg.Color=Color3.fromHSV(perc*0.333,0.5,1); hFg.Visible=true
-            topY = topY - bh - 2
-        else hBg.Visible=false; hFg.Visible=false end
-        nameText.Text    = nameESPEnabled and player.Name or ""
-        nameText.Color   = isPlayerExcluded(player.Name) and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,255,255)
-        nameText.Position= Vector2.new(centerX, topY-16); nameText.Visible=nameESPEnabled
-        distText.Text    = distanceESPEnabled and string.format("%.0f studs", dist) or ""
-        distText.Position= Vector2.new(centerX, maxY+4);  distText.Visible=distanceESPEnabled
-        hl.Enabled       = highlightEnabled
-    end)
-    espPlayers[player] = {conn=conn, drawings=drawings}
-end
-
-local function loadESP()
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and not espPlayers[p] then createESP(p) end
-    end
-    Players.PlayerAdded:Connect(function(p)
-        if p ~= LocalPlayer then
-            p.CharacterAdded:Connect(function()
-                task.wait(0.15)
-                if not espPlayers[p] then createESP(p) end
-            end)
-        end
-    end)
-    Players.PlayerRemoving:Connect(function(p)
-        if espPlayers[p] then
-            for _, obj in pairs(espPlayers[p].drawings) do
-                if obj and obj.Destroy then pcall(function() obj:Destroy() end)
-                elseif typeof(obj)=="table" and obj.Visible ~= nil then obj.Visible=false end
-            end
-            pcall(function() espPlayers[p].conn:Disconnect() end)
-            espPlayers[p] = nil
-        end
-    end)
-end
-
--- ==========================================
--- FOV CIRCLE SETUP
--- ==========================================
-if not isMobile then
-    SilentFOVCircle = Drawing.new("Circle")
-    SilentFOVCircle.Color       = Color3.fromRGB(0, 220, 100)
-    SilentFOVCircle.Thickness   = 1.5
-    SilentFOVCircle.NumSides    = 64
-    SilentFOVCircle.Filled      = false
-    SilentFOVCircle.Transparency= 0.5
-    SilentFOVCircle.Radius      = FOVRadius
-    SilentFOVCircle.Visible     = false
-else
-    local fovSG = Instance.new("ScreenGui")
-    fovSG.Name   = "MobileFOV"
-    fovSG.Parent = LocalPlayer:WaitForChild("PlayerGui")
-    SilentFOVCircle = Instance.new("Frame")
-    SilentFOVCircle.Size = UDim2.fromOffset(FOVRadius*2, FOVRadius*2)
-    SilentFOVCircle.AnchorPoint = Vector2.new(0.5, 0.5)
-    SilentFOVCircle.Position = UDim2.fromScale(0.5, 0.5)
-    SilentFOVCircle.BackgroundTransparency = 1
-    Instance.new("UICorner", SilentFOVCircle).CornerRadius = UDim.new(1,0)
-    local bs = Instance.new("UIStroke", SilentFOVCircle)
-    bs.Color = Color3.fromRGB(0,220,100); bs.Thickness=2; bs.Transparency=0.3
-    SilentFOVCircle.Parent = fovSG
-end
-
--- ==========================================
--- MAIN RENDER LOOP
--- ==========================================
+-- =====================================================
+-- RENDER LOOP
+-- =====================================================
 RunService.RenderStepped:Connect(function()
     pcall(function()
-        -- Update CurrentTarget
-        CurrentTarget = (SilentAimEnabled or SilentAimAttachEnabled) and getClosestTarget() or nil
+        CurrentTarget = SilentEnabled and getClosestTarget() or nil
 
         -- FOV Circle
-        if SilentFOVCircle then
-            SilentFOVCircle.Visible = SilentAimEnabled or SilentAimAttachEnabled
-            if not isMobile then
-                SilentFOVCircle.Position = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-                SilentFOVCircle.Radius   = FOVRadius
-            else
-                SilentFOVCircle.Size = UDim2.fromOffset(FOVRadius*2, FOVRadius*2)
-            end
+        if FOVCircle then
+            FOVCircle.Visible  = SilentEnabled and ShowFOV
+            FOVCircle.Radius   = FOVRadius
+            FOVCircle.Position = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
         end
 
         -- Tracer
-        if CurrentTarget and CurrentTarget.Character and CurrentTarget.Character:FindFirstChild("Head") then
-            local hum = CurrentTarget.Character:FindFirstChild("Humanoid")
-            if hum and hum.Health > 0 then
-                local sp, on = Camera:WorldToViewportPoint(CurrentTarget.Character.Head.Position)
+        if ShowTracer and SilentEnabled and CurrentTarget and CurrentTarget.Character then
+            local head = CurrentTarget.Character:FindFirstChild("Head")
+            local hum  = CurrentTarget.Character:FindFirstChild("Humanoid")
+            if head and hum and hum.Health > 0 then
+                local sp, on = Camera:WorldToViewportPoint(head.Position)
                 if on then
                     Tracer.Visible = true
                     Tracer.From    = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
                     Tracer.To      = Vector2.new(sp.X, sp.Y)
-                    Tracer.Color   = Color3.fromRGB(0, 255, 80)
                 else Tracer.Visible = false end
             else Tracer.Visible = false end
-        else Tracer.Visible = false end
-
-        -- Fly
-        if FlyEnabled and isFlyingUp and HumanoidRootPart then
-            HumanoidRootPart.Velocity = Vector3.new(
-                HumanoidRootPart.Velocity.X, floatPower, HumanoidRootPart.Velocity.Z)
+        else
+            Tracer.Visible = false
         end
     end)
-end)
-
--- ==========================================
--- HEARTBEAT LOOPS
--- ==========================================
-RunService.Heartbeat:Connect(function()
-    pcall(CheckAndPickup)
-end)
-
-RunService.Heartbeat:Connect(function()
-    if not enabled then return end
-    if isDowned() then
-        if not undergroundBaseCFrame then teleportUnderground() end
-        flickerAndMove()
-    else
-        if undergroundBaseCFrame then
-            local hrp = getHRP()
-            if hrp then hrp.CFrame = undergroundBaseCFrame + Vector3.new(0, -DROP_DEPTH, 0) end
-        end
-        undergroundBaseCFrame = nil
-        flickering = false
-    end
-end)
-
--- Auto Respawn loop
-RunService.Heartbeat:Connect(function()
-    if not AutoRespawnEnabled then return end
-    if not Humanoid then return end
-    if Humanoid.Health <= 0 then
-        pcall(function() LocalPlayer:LoadCharacter() end)
-    end
-end)
-
--- ==========================================
--- FLY SETUP
--- ==========================================
-ContextActionService:BindAction("yomoFlyUp",
-    function(_, inputState, inputObject)
-        if not FlyEnabled then return Enum.ContextActionResult.Pass end
-        local isJump = (inputObject.UserInputType == Enum.UserInputType.Keyboard
-                        and inputObject.KeyCode == Enum.KeyCode.Space)
-                    or (inputObject.UserInputType == Enum.UserInputType.Touch)
-        if isJump then
-            isFlyingUp = (inputState == Enum.UserInputState.Begin)
-            if isFlyingUp and Humanoid then Humanoid.Jump = true end
-            return Enum.ContextActionResult.Sink
-        end
-        return Enum.ContextActionResult.Pass
-    end, false, Enum.KeyCode.Space)
-
-RunService.RenderStepped:Connect(function()
-    if FlyEnabled and isFlyingUp and HumanoidRootPart then
-        HumanoidRootPart.Velocity = Vector3.new(
-            HumanoidRootPart.Velocity.X, floatPower, HumanoidRootPart.Velocity.Z)
-    end
 end)
 
 LocalPlayer.CharacterAdded:Connect(function(char)
-    local hum = char:WaitForChild("Humanoid")
-    if flyJumpConn then flyJumpConn:Disconnect() end
-    flyJumpConn = hum:GetPropertyChangedSignal("Jumping"):Connect(function()
-        if FlyEnabled then isFlyingUp = hum.Jumping end
-    end)
-end)
-
--- ==========================================
--- INPUT BINDINGS
--- ==========================================
-UserInputService.InputBegan:Connect(function(input, gp)
-    if gp then return end
-    if input.KeyCode == Enum.KeyCode.G then
-        if Window and Window.Toggle then Window:Toggle()
-        elseif Window and Window.UI then Window.UI.Enabled = not Window.UI.Enabled end
-    end
-end)
-
--- ==========================================
--- INIT
--- ==========================================
-StartAutoAttack()
-SetupAutoSkip()
-ReplicatedStorage.ChildAdded:Connect(function(c)
-    if c.Name == "Remotes" then SetupAutoSkip() end
-end)
-for _, cat in ipairs({"gun","melee","throwable","consumable","farming","misc","rod","fish"}) do
-    pcall(function() registerItems(ReplicatedStorage:WaitForChild("Items")[cat]) end)
-end
-for _, p in ipairs(Players:GetPlayers()) do setupFastFinish(p) end
-Players.PlayerAdded:Connect(setupFastFinish)
-Players.PlayerAdded:Connect(function(p)
-    p.CharacterAdded:Connect(function()
-        if ESPEnabled then task.wait(0.2); createBillboardForPlayer(p) end
-    end)
-end)
-Players.PlayerRemoving:Connect(function(p)
-    if BillboardCache[p] then BillboardCache[p]:Destroy(); BillboardCache[p] = nil end
-end)
-Players.PlayerAdded:Connect(function(p)
-    p.CharacterAdded:Connect(function(char)
-        if highlightEnabled then highlights[p] = createHighlight(char) end
-    end)
-end)
-Players.PlayerRemoving:Connect(function(p)
-    if espPlayers[p] then
-        for _,obj in pairs(espPlayers[p].drawings) do
-            if obj and obj.Destroy then pcall(function() obj:Destroy() end)
-            elseif typeof(obj)=="table" and obj.Visible~=nil then obj.Visible=false end
-        end
-        pcall(function() espPlayers[p].conn:Disconnect() end)
-        espPlayers[p] = nil
-    end
-end)
-task.spawn(function()
-    while task.wait(1) do
-        if highlightEnabled then updateHighlights() end
-    end
-end)
-task.spawn(function()
-    while true do
-        task.wait(scanInterval)
-        if fastFinishEnabled then pcall(findAndTriggerPrompts) end
-    end
-end)
-loadESP()
-
-LocalPlayer.CharacterAdded:Connect(function()
-    task.wait(1)
-    running = false
-    task.wait(0.1)
-    StartAutoAttack()
+    Character = char
 end)
 
 -- =====================================================
--- UI TABS
+-- UI — WindUI 1.6.62
 -- =====================================================
+local Tab = Window:Tab({Title = "Silent Aim", Icon = "crosshair"})
 
--- ============ COMBAT ============
-local Tab = Window:Tab({Title = "COMBAT:", Icon = "crosshair"})
-Tab:Section({Title = "Silent Aim"})
+-- Section: Main Toggle
+Tab:Section({Title = "Aim"})
 
 local SilentToggle = Tab:Toggle({
-    Title = "Silent Aim",
-    Default = false,
+    Title    = "Silent Aim",
+    Desc     = "เบี่ยงกระสุนไปหัวศัตรูอัตโนมัติ",
+    Icon     = "crosshair",
+    Type     = "Checkbox",  -- 1.6.61+ style
+    Value    = false,        -- 1.6.53+ ใช้ Value แทน Default
     Callback = function(state)
-        SilentAimEnabled = state
-        CurrentTarget = nil
-        if state then
-            SilentAimAttachEnabled = false
-            if AttachToggle then AttachToggle:Set(false) end
-        end
+        SilentEnabled = state
+        if not state then CurrentTarget = nil end
+        Notify(state and "✅ Silent Aim ON" or "⛔ Silent Aim OFF", "", 2)
     end
 })
-myConfig:Register("SilentAim", SilentToggle)
-
-local AttachToggle = Tab:Toggle({
-    Title = "Silent Aim (Attach / Anti Lock)",
-    Default = false,
-    Callback = function(state)
-        SilentAimAttachEnabled = state
-        CurrentTarget = nil
-        if state then
-            SilentAimEnabled = false
-            if SilentToggle then SilentToggle:Set(false) end
-        end
-    end
-})
-myConfig:Register("SilentAimAttach", AttachToggle)
-
-local WallShootToggle = Tab:Toggle({
-    Title = "Wall Shoot",
-    Default = false,
-    Callback = function(state) WallShootEnabled = state end
-})
-myConfig:Register("WallShoot", WallShootToggle)
 
 Tab:Slider({
-    Title = "FOV Radius",
-    Step = 1,
-    Value = {Min = 20, Max = 750, Default = FOVRadius},
-    Callback = function(v) FOVRadius = tonumber(v) or 120 end
+    Title    = "FOV Radius",
+    Desc     = "ขนาดวงกลมจับเป้า",
+    Icon     = "circle",
+    Value    = {Min = 20, Max = 700, Default = FOVRadius},
+    Step     = 5,
+    Callback = function(v)
+        FOVRadius = tonumber(v) or 150
+    end
 })
+
+Tab:Divider()
+Tab:Section({Title = "Options"})
+
+Tab:Toggle({
+    Title    = "Wall Shoot",
+    Desc     = "ยิงทะลุกำแพงได้",
+    Icon     = "layers",
+    Type     = "Checkbox",
+    Value    = false,
+    Callback = function(state) WallShoot = state end
+})
+
+Tab:Toggle({
+    Title    = "Bullet Trail",
+    Desc     = "แสดงเส้นสีเขียวพุ่งออกไปตอนยิง",
+    Icon     = "zap",
+    Type     = "Checkbox",
+    Value    = true,
+    Callback = function(state) BulletTrail = state end
+})
+
+Tab:Toggle({
+    Title    = "FOV Circle",
+    Desc     = "แสดงวงกลม FOV บนหน้าจอ",
+    Icon     = "scan",
+    Type     = "Checkbox",
+    Value    = true,
+    Callback = function(state)
+        ShowFOV = state
+        if FOVCircle then FOVCircle.Visible = state and SilentEnabled end
+    end
+})
+
+Tab:Toggle({
+    Title    = "Target Tracer",
+    Desc     = "แสดงเส้นชี้ไปยังเป้า",
+    Icon     = "navigation",
+    Type     = "Checkbox",
+    Value    = true,
+    Callback = function(state)
+        ShowTracer = state
+        if not state then Tracer.Visible = false end
+    end
+})
+
+Tab:Divider()
+Tab:Section({Title = "Friend List"})
 
 Tab:Input({
-    Title = "Safe Friend List",
-    Desc = "กรอกชื่อ (คั่นด้วยช่องว่าง)",
-    Value = "", InputIcon = "shield-check", Placeholder = "",
-    Callback = function(input)
-        excludedPlayerNames = {}
+    Title       = "Safe Friends",
+    Desc        = "ชื่อผู้เล่นที่ไม่โดน aim (คั่นด้วยช่องว่าง)",
+    Icon        = "shield-check",
+    Placeholder = "username1 username2",
+    Value       = "",
+    Callback    = function(input)
+        SafeList = {}
         for name in string.gmatch(input, "%S+") do
-            table.insert(excludedPlayerNames, name)
+            table.insert(SafeList, name)
         end
+        Notify("✅ Friend List", #SafeList .. " คนถูกเพิ่ม", 2)
     end
 })
 
 Tab:Divider()
-Tab:Section({Title = "Melee"})
+Tab:Section({Title = "Info"})
 
-Tab:Toggle({
-    Title = "Hit Aura (Auto Melee)",
-    Default = false,
-    Callback = function(state) hookEnabled = state end
-})
-
-Tab:Slider({
-    Title = "Aura Radius",
-    Step = 1,
-    Value = {Min = 5, Max = 60, Default = scanRadius},
-    Callback = function(v) scanRadius = tonumber(v) end
-})
-
-Tab:Divider()
-Tab:Section({Title = "Fists"})
-
-Tab:Toggle({
-    Title = "Fists In Car",
-    Default = false,
-    Callback = function(state)
-        if not state then return end
-        local function fix(v)
-            if v and v:IsA("Tool") and v.Name == "Fists" then
-                pcall(function() v:SetAttribute("Disabled", false) end)
-                pcall(function() v:SetAttribute("DisableInVehicle", false) end)
-            end
-        end
-        for _, v in ipairs(LocalPlayer.Backpack:GetChildren()) do fix(v) end
-        if LocalPlayer.Character then
-            for _, v in ipairs(LocalPlayer.Character:GetChildren()) do fix(v) end
-        end
-        LocalPlayer.CharacterAdded:Connect(function(c)
-            task.wait(1)
-            for _, v in ipairs(c:GetChildren()) do fix(v) end
-        end)
-        Notify("✅ Fists In Car", "เปิดแล้ว", 2)
-    end
-})
-
--- ============ WEAPON ============
-local Tab_mods = Window:Tab({Title = "WEAPON:", Icon = "layers"})
-Tab_mods:Section({Title = "Mods"})
-
-Tab_mods:Button({
-    Title = "Fast Shoot + No Recoil (Equipped)",
+Tab:Button({
+    Title    = "Debug: Show Current Target",
+    Desc     = "แสดงชื่อเป้าใน Console",
+    Icon     = "bug",
     Callback = function()
-        local char = LocalPlayer.Character
-        if not char then Notify("❌", "Character ไม่พบ", 2); return end
-        local count = 0
-        for _, tool in pairs(char:GetChildren()) do
-            if tool:IsA("Tool") then
-                local attrs = {}
-                for n in pairs(tool:GetAttributes()) do table.insert(attrs, n) end
-                table.sort(attrs)
-                if #attrs >= 6 then
-                    pcall(function() tool:SetAttribute(attrs[6], 1500) end)
-                end
-                pcall(function() tool:SetAttribute("Recoil", 0) end)
-                pcall(function() tool:SetAttribute("FireRate", 0) end)
-                pcall(function() tool:SetAttribute("ChargeTime", 0) end)
-                count = count + 1
-            end
-        end
-        Notify("✅ Weapon Modded", count.." tool(s) updated", 3)
-    end
-})
-
-Tab_mods:Button({
-    Title = "Max Ammo (Equipped)",
-    Callback = function()
-        if not LocalPlayer.Character then return end
-        for _, tool in pairs(LocalPlayer.Character:GetChildren()) do
-            if tool:IsA("Tool") then
-                for n, v in pairs(tool:GetAttributes()) do
-                    local nl = string.lower(n)
-                    if nl:find("ammo") or nl:find("magazine") or nl:find("clip") then
-                        pcall(function() tool:SetAttribute(n, 9999) end)
-                    end
-                end
-            end
-        end
-        Notify("✅ Max Ammo", "อัดกระสุนเต็มแล้ว", 2)
-    end
-})
-
--- ============ ESP ============
-local Tab_ESP = Window:Tab({Title = "ESP:", Icon = "eye"})
-Tab_ESP:Section({Title = "ESP"})
-
-Tab_ESP:Toggle({
-    Title = "Box ESP",  Default = false,
-    Callback = function(s) boxESPEnabled = s end
-})
-Tab_ESP:Toggle({
-    Title = "Name ESP", Default = false,
-    Callback = function(s) nameESPEnabled = s end
-})
-Tab_ESP:Toggle({
-    Title = "Health ESP", Default = false,
-    Callback = function(s) healthESPEnabled = s end
-})
-Tab_ESP:Toggle({
-    Title = "Distance ESP", Default = false,
-    Callback = function(s) distanceESPEnabled = s end
-})
-Tab_ESP:Toggle({
-    Title = "Highlight", Default = false,
-    Callback = function(state)
-        highlightEnabled = state
-        if not state then
-            for _, hl in pairs(highlights) do pcall(function() hl:Destroy() end) end
-            highlights = {}
-        end
-    end
-})
-Tab_ESP:Toggle({
-    Title = "Items ESP (Weapon Icons)",
-    Default = false,
-    Callback = function(state)
-        ESPEnabled = state
-        if state then
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= LocalPlayer and p.Character then createBillboardForPlayer(p) end
-            end
-            ESPConnection = RunService.Heartbeat:Connect(function()
-                for _, p in ipairs(Players:GetPlayers()) do
-                    if p ~= LocalPlayer and p.Character then createBillboardForPlayer(p) end
-                end
-            end)
+        if CurrentTarget then
+            Notify("🎯 Target", CurrentTarget.Name, 3)
+            print("[SilentAim] Target:", CurrentTarget.Name)
         else
-            if ESPConnection then ESPConnection:Disconnect(); ESPConnection = nil end
-            for _, bb in pairs(BillboardCache) do bb:Destroy() end
-            BillboardCache = {}
+            Notify("❌ No Target", "ไม่มีเป้าใน FOV", 2)
         end
     end
 })
 
--- ============ CHARACTER ============
-local Tab_char = Window:Tab({Title = "CHARACTER:", Icon = "user"})
-Tab_char:Section({Title = "Speed & Movement"})
-
-Tab_char:Toggle({
-    Title = "Walk Speed Boost",
-    Default = false,
-    Callback = function(state) walkSpeedEnabled = state end
-})
-Tab_char:Slider({
-    Title = "Walk Speed",
-    Step = 1,
-    Value = {Min = 16, Max = 120, Default = 32},
-    Callback = function(v) speedValue = tonumber(v) or 32 end
-})
-
-Tab_char:Toggle({
-    Title = "Jump / Fly (Hold Space)",
-    Default = false,
-    Callback = function(state) FlyEnabled = state; if not state then isFlyingUp = false end end
-})
-Tab_char:Slider({
-    Title = "Float Power",
-    Step = 5,
-    Value = {Min = 20, Max = 200, Default = 50},
-    Callback = function(v) floatPower = tonumber(v) or 50 end
-})
-
-Tab_char:Divider()
-Tab_char:Section({Title = "Auto Pickup"})
-Tab_char:Toggle({
-    Title = "Auto Pickup Items",
-    Default = false,
-    Callback = function(state) sucking = state end
-})
-
-Tab_char:Divider()
-Tab_char:Section({Title = "Ghost / Downed"})
-Tab_char:Toggle({
-    Title = "Ghost Mode (When Downed)",
-    Default = false,
-    Callback = function(state)
-        enabled = state
-        if not state then undergroundBaseCFrame = nil; flickering = false end
-    end
-})
-
-Tab_char:Toggle({
-    Title = "Auto Respawn",
-    Default = false,
-    Callback = function(state) AutoRespawnEnabled = state end
-})
-
-Tab_char:Divider()
-Tab_char:Section({Title = "Snap Under Map  [Z Key]"})
-Tab_char:Toggle({
-    Title = "Enable Snap Under Map",
-    Default = false,
-    Callback = function(state)
-        featureEnabled = state
-        if state then
-            teleportActive = true
-            performSnap()
-        else
-            stopSnap()
-        end
-    end
-})
-Tab_char:Slider({
-    Title = "Snap Depth",
-    Step = 1,
-    Value = {Min = 1, Max = 80, Default = 10},
-    Callback = function(v)
-        maxHeight = tonumber(v) or 10
-        if teleportActive and HumanoidRootPart and startY then
-            local ny = startY - maxHeight
-            HumanoidRootPart.CFrame = CFrame.new(HumanoidRootPart.Position.X, ny, HumanoidRootPart.Position.Z)
-            lockedY = ny
-        end
-    end
-})
-
--- ============ PLAYER ============
-local Tab_player = Window:Tab({Title = "PLAYER:", Icon = "person-standing"})
-Tab_player:Section({Title = "Troll"})
-
-Tab_player:Input({
-    Title = "Player Name:",
-    Desc = "ชื่อผู้เล่นที่ต้องการ Bring",
-    Value = "", InputIcon = "user", Placeholder = "Username",
-    Callback = function(input) SelectedPlayer = input end
-})
-Tab_player:Button({
-    Title = "Start Bring",
-    Callback = function()
-        if not SelectedPlayer or SelectedPlayer == "" then
-            Notify("❌", "กรอกชื่อก่อน", 2); return
-        end
-        ToggleBring(SelectedPlayer)
-        Notify(Active and "🔥 Bring ON" or "⛔ Bring OFF", SelectedPlayer, 2)
-    end
-})
-Tab_player:Button({
-    Title = "Stop Bring",
-    Callback = function()
-        Active = false
-        if BringConnection then BringConnection:Disconnect() end
-        Notify("⛔ Stopped", "", 2)
-    end
-})
-
-Tab_player:Divider()
-Tab_player:Section({Title = "Auto Finish"})
-Tab_player:Toggle({
-    Title = "Auto Finish (Instant)",
-    Default = false,
-    Callback = function(state)
-        fastFinishEnabled = state
-        if state then
-            -- ตั้ง hold time = 0 ให้ทุก prompt ที่มีอยู่
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= LocalPlayer and p.Character then
-                    local hrp = p.Character:FindFirstChild("HumanoidRootPart")
-                    if hrp then
-                        local pr = hrp:FindFirstChild("FinishPrompt")
-                        if pr then setFinishPrompt(pr) end
-                    end
-                end
-            end
-            Notify("✅ Auto Finish ON", "Instant Kill Enabled", 2)
-        else
-            Notify("❌ Auto Finish OFF", "", 2)
-        end
-    end
-})
-
--- ============ BUY ============
-local Tab_buyer = Window:Tab({Title = "BUY:", Icon = "landmark"})
-Tab_buyer:Section({Title = "Crate"})
-
-Tab_buyer:Toggle({
-    Title = "Skip Crate Spin",
-    Default = false,
-    Callback = function(state)
-        AutoSkipEnabled = state
-        if state then TrySkipCrate() end
-    end
-})
-
--- ============ MISC ============
-local Tab_misc = Window:Tab({Title = "MISC:", Icon = "warehouse"})
-Tab_misc:Section({Title = "Quest"})
-
-Tab_misc:Button({
-    Title = "Claim All Quests",
-    Callback = function()
-        task.spawn(function()
-            local ok, err = pcall(function()
-                local questFrame = LocalPlayer:WaitForChild("PlayerGui")
-                    :WaitForChild("Quests"):WaitForChild("QuestsHolder")
-                    :WaitForChild("QuestsScrollingFrame")
-                for _, child in ipairs(questFrame:GetChildren()) do
-                    if child:IsA("Frame") or child:IsA("TextButton") or child:IsA("ImageButton") then
-                        NetGet("claim_quest", child.Name)
-                        task.wait(0.15)
-                    end
-                end
-            end)
-            Notify(ok and "✅ All Quests Claimed" or "❌ Error", ok and "" or tostring(err), 3)
-        end)
-    end
-})
-
-Tab_misc:Divider()
-Tab_misc:Section({Title = "Config"})
-
-local saveFunc   = myConfig["Save"]
-local deleteFunc = myConfig["Delete"]
-local loadFunc   = myConfig["Load"]
-
-Tab_misc:Button({
-    Title = "💾 Save Config",
-    Callback = function()
-        if saveFunc then saveFunc(myConfig) end
-        Notify("✅ Saved", "Config บันทึกแล้ว", 2)
-    end
-})
-Tab_misc:Button({
-    Title = "🗑 Delete Config",
-    Callback = function()
-        if deleteFunc then deleteFunc(myConfig) end
-        Notify("🗑 Deleted", "", 2)
-    end
-})
-
-if loadFunc then loadFunc(myConfig) end
+print("[SilentAim] โหลดสำเร็จ ✅  version WindUI 1.6.62")
