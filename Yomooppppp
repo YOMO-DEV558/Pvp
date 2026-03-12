@@ -1265,7 +1265,7 @@ local CombatTab = Window:Tab({Title = "MAIN", Icon = "user"})
 
 CombatTab:Toggle({
     Title = "Silent Aim | Wallbang",
-    Desc = "ล็อคกระสุนกับยิงทะลุ",
+    Desc = "",
     Default = false,
     Callback = function(state)
         SilentAimEnabled = state
@@ -1275,7 +1275,7 @@ CombatTab:Toggle({
 
 CombatTab:Slider({
     Title = "FOV",
-    Desc = "ปรับขนาดวง FOV",
+    Desc = "",
     Value = {Min=20, Max=750, Default=FOV},
     Callback = function(value)
         FOV = value
@@ -1291,7 +1291,7 @@ CombatTab:Slider({
 
 CombatTab:Toggle({
     Title = "Show FOV",
-    Desc = "แสดงวง FOV",
+    Desc = "",
     Default = ShowFOV,
     Callback = function(state)
         ShowFOV = state
@@ -1302,7 +1302,7 @@ CombatTab:Toggle({
 
 CombatTab:Dropdown({
     Title = "Lock Part",
-    Desc = "เลือกจุดที่ Silent Aimจะล็อค",
+    Desc = "",
     Values = {"Head","HumanoidRootPart"},
     Default = "Head",
     Callback = function(v)
@@ -1313,7 +1313,7 @@ CombatTab:Dropdown({
 
 CombatTab:Dropdown({
     Title = "Save Friend",
-    Desc = "เลือกเพื่อนที่จะไม่ล็อค",
+    Desc = "",
     Values = GetPlayerNames(),
     Multi = true,
     Default = {},
@@ -1741,7 +1741,7 @@ DroppedFolder.ChildRemoved:Connect(removeItemESP)
 
 EspTab:Toggle({
     Title = "ESP Dropped Items",
-    Desc = "มองไอเท็มดรอบ",
+    Desc = "",
     Default = false,
     Callback = function(state)
         ShowItemESP = state
