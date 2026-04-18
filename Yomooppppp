@@ -29,7 +29,6 @@ local Window = WindUI:CreateWindow({
 })
 local CombatTab = Window:Tab({Title = "Combat", Icon = "sword"})
 local ESPTab = Window:Tab({Title = "ESP", Icon = "eye"})
-local DesyncTab = Window:Tab({Title = "Desync", Icon = "shield-alert"})
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -47,8 +46,8 @@ local function doNoRecoil()
 		task.wait(1)
 		pcall(function()
 			for _, tool in pairs(LocalPlayer.Backpack:GetChildren()) do
-				if tool:IsA("Tool") and (tool:FindFirstChild("Recoil") or tool:GetAttribute("Recoil")) then					if tool:FindFirstChild("Recoil") then tool.Recoil.Value = 0 end
-					if tool:GetAttribute("Recoil") then tool:SetAttribute("Recoil", 0) end
+				if tool:IsA("Tool") and (tool:FindFirstChild("Recoil") or tool:GetAttribute("Recoil")) then
+					if tool:FindFirstChild("Recoil") then tool.Recoil.Value = 0 end					if tool:GetAttribute("Recoil") then tool:SetAttribute("Recoil", 0) end
 				end
 			end
 			for _, tool in pairs(LocalPlayer.Character:GetChildren()) do
@@ -96,8 +95,8 @@ CombatTab:Toggle({
 	end
 })
 CombatTab:Toggle({
-	Title = "Show FOV Circle",	Default = false,
-	Callback = function(v)
+	Title = "Show FOV Circle",
+	Default = false,	Callback = function(v)
 		showFov = v
 		FOVCircle.Visible = v
 	end
@@ -145,8 +144,8 @@ local send = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Send")
 local oldFire
 oldFire = hookfunction(send.FireServer, function(self, ...)
 	local args = {...}
-	if SilentAimEnabled then		local target = GetClosestTargetFOV()
-		if target and target.Character then
+	if SilentAimEnabled then
+		local target = GetClosestTargetFOV()		if target and target.Character then
 			local head = target.Character:FindFirstChild("Head")
 			local root = target.Character:FindFirstChild("HumanoidRootPart")
 			if head and root then
@@ -194,105 +193,12 @@ RunService.RenderStepped:Connect(function()
 			else
 				TracerLine.Visible = false
 			end
-		else			TracerLine.Visible = false
-		end
+		else
+			TracerLine.Visible = false		end
 	else
 		TracerLine.Visible = false
 	end
 end)
-
--------------------------------------------------
--- Desync Tab: Network & Position Desync -------
--------------------------------------------------
-local DesyncEnabled = false
-local DesyncMethod = "Position Offset"
-local DesyncIntensity = 0.4
-local originalCF = nil
-local lastValidPos = nil
-
-DesyncTab:Toggle({
-	Title = "Enable Desync",
-	Default = false,
-	Callback = function(v)
-		DesyncEnabled = v
-		if v and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-			local hrp = LocalPlayer.Character.HumanoidRootPart
-			originalCF = hrp.CFrame
-			lastValidPos = hrp.Position
-		elseif not v and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-			local hrp = LocalPlayer.Character.HumanoidRootPart
-			if originalCF then
-				hrp.CFrame = originalCF
-				hrp.Velocity = Vector3.zero
-			end
-			originalCF = nil
-			lastValidPos = nil
-		end
-	end
-})
-
-DesyncTab:Dropdown({
-	Title = "Desync Method",
-	Options = {"Position Offset", "Network Delay", "Velocity Shift"},
-	Default = "Position Offset",
-	Callback = function(v) DesyncMethod = v end
-})
-
-DesyncTab:Slider({
-	Title = "Intensity (0.1 - 2.0)",
-	Step = 0.1,
-	Value = {Min = 0.1, Max = 2.0, Default = 0.4},
-	Callback = function(v) DesyncIntensity = tonumber(v) end
-})
-DesyncTab:Label({Title = "⚠️ ใช้ค่าต่ำ (0.3-0.6) เพื่อลดความเสี่ยงถูกแบน"})
-
--- Desync Loop (ใช้ Heartbeat เพื่อความเสถียร)
-task.spawn(function()
-	while true do
-		if DesyncEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-			local hrp = LocalPlayer.Character.HumanoidRootPart
-			local t = tick()
-
-			if DesyncMethod == "Position Offset" then
-				-- เลื่อนตำแหน่ง Client เล็กน้อยแบบ Sine Wave ให้ Server คำนวณผิด
-				local offset = Vector3.new(
-					math.sin(t * DesyncIntensity * 3) * DesyncIntensity * 2,
-					0,
-					math.cos(t * DesyncIntensity * 3) * DesyncIntensity * 2
-				)
-				-- เก็บตำแหน่งจริงไว้เพื่อป้องกันยางยืด
-				if not lastValidPos then lastValidPos = hrp.Position end
-				hrp.CFrame = CFrame.new(lastValidPos + offset)
-
-			elseif DesyncMethod == "Network Delay" then
-				-- จำลอง Network Lag ชั่วคราว ทำให้แพ็กเก็ตการยิงล่าช้า
-				task.wait(DesyncIntensity * 0.25)
-
-			elseif DesyncMethod == "Velocity Shift" then
-				-- เปลี่ยนความเร็ว Client ให้ไม่ตรงกับ Server ทำให้ Hitbox เคลื่อนที่ผิดจังหวะ
-				local dir = hrp.CFrame.LookVector * DesyncIntensity * 5
-				hrp.Velocity = dir + Vector3.new(0, hrp.Velocity.Y, 0)
-			end
-		else
-			-- รีเซ็ตเมื่อปิดหรือไม่มีตัวละคร
-			if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-				local hrp = LocalPlayer.Character.HumanoidRootPart
-				if lastValidPos then
-					hrp.CFrame = CFrame.new(lastValidPos)
-					hrp.Velocity = Vector3.zero
-				end
-			end
-			lastValidPos = nil
-		end
-		RunService.Heartbeat:Wait()
-	end
-end)
-
--- อัปเดตตำแหน่งจริงเมื่อตัวละครเคลื่อนที่ (ป้องกันยางยืด)
-RunService.Heartbeat:Connect(function()
-	if not DesyncEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-		lastValidPos = LocalPlayer.Character.HumanoidRootPart.Position
-	endend)
 
 -------------------------------------------------
 -- ESP ระบบบ็อกซ์/ชื่อ --------------------------
@@ -337,11 +243,11 @@ local function createESP(player)
 			return
 		end
 		local head = player.Character.Head
-		local hrp = player.Character.HumanoidRootPart
-		local topWorld = head.Position + Vector3.new(0, 1, 0)
+		local hrp = player.Character.HumanoidRootPart		local topWorld = head.Position + Vector3.new(0, 1, 0)
 		local bottomWorld = hrp.Position - Vector3.new(0, 3.5, 0)
 		local top, onTop = Camera:WorldToViewportPoint(topWorld)
-		local bottom, onBottom = Camera:WorldToViewportPoint(bottomWorld)		if onTop and onBottom and top.Z > 0 and bottom.Z > 0 then
+		local bottom, onBottom = Camera:WorldToViewportPoint(bottomWorld)
+		if onTop and onBottom and top.Z > 0 and bottom.Z > 0 then
 			local height = math.abs(top.Y - bottom.Y) * 1.2
 			local width = height / 1.5
 			local x = top.X - width / 2
@@ -386,11 +292,11 @@ local function loadESP()
 		if player ~= LocalPlayer then
 			player.CharacterAdded:Connect(function() wait(0.1) createESP(player) end)
 		end
-	end)
-	Players.PlayerRemoving:Connect(function(player)
+	end)	Players.PlayerRemoving:Connect(function(player)
 		if espPlayers[player] then
 			espPlayers[player].conn:Disconnect()
-			for _, drawing in pairs(espPlayers[player].drawings) do drawing:Remove() end			espPlayers[player] = nil
+			for _, drawing in pairs(espPlayers[player].drawings) do drawing:Remove() end
+			espPlayers[player] = nil
 		end
 	end)
 end
