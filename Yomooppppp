@@ -1,4 +1,4 @@
--- WindUI ส่วนเดิม --
+-- WindUI Latest Version --
 local WindUI
 do
 	local ok, result = pcall(function()
@@ -10,23 +10,61 @@ do
 		WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/dist/main.lua"))()
 	end
 end
+
+-- สร้างหน้าต่างด้วยธีมดำ-ขาว
 local Window = WindUI:CreateWindow({
-	Title = "XHUB v2",
-	Author = "Modified",
+	Title = ".",
+	Author = "..",
 	Folder = "ftgshub",
-	Icon = "computer",
+	Icon = "terminal",
 	NewElements = true,
 	HideSearchBar = false,
+	Theme = {
+		-- พื้นฐาน
+		Background = Color3.fromRGB(10, 10, 10),
+		Outline = Color3.fromRGB(255, 255, 255),
+		Text = Color3.fromRGB(255, 255, 255),
+		Accent = Color3.fromRGB(255, 255, 255),
+		
+		-- Window
+		WindowBackground = Color3.fromRGB(15, 15, 15),
+		WindowTopbarTitle = Color3.fromRGB(255, 255, 255),
+		WindowTopbarAuthor = Color3.fromRGB(180, 180, 180),
+		
+		-- Tab
+		TabBackground = Color3.fromRGB(20, 20, 20),
+		TabBackgroundActive = Color3.fromRGB(35, 35, 35),
+		TabText = Color3.fromRGB(255, 255, 255),
+		TabBorder = Color3.fromRGB(255, 255, 255),
+		
+		-- Element
+		ElementBackground = Color3.fromRGB(25, 25, 25),
+		ElementBackgroundHover = Color3.fromRGB(45, 45, 45),
+		ElementTitle = Color3.fromRGB(255, 255, 255),
+		
+		-- Toggle
+		ToggleBackground = Color3.fromRGB(30, 30, 30),
+		ToggleEnabled = Color3.fromRGB(255, 255, 255),
+		
+		-- Slider
+		SliderBackground = Color3.fromRGB(30, 30, 30),		SliderProgress = Color3.fromRGB(255, 255, 255),
+		SliderThumb = Color3.fromRGB(255, 255, 255),
+		
+		-- Dropdown
+		DropdownBackground = Color3.fromRGB(25, 25, 25),
+		DropdownOptionHover = Color3.fromRGB(50, 50, 50),
+	},
 	OpenButton = {
 		Title = "mo XHUB",
-		CornerRadius = UDim.new(1,0),
-		StrokeThickness = 3,
+		CornerRadius = UDim.new(1, 0),
+		StrokeThickness = 2,
 		Enabled = true,
 		Draggable = true,
 		OnlyMobile = false,
-		Color = ColorSequence.new(Color3.fromHex("#30FF6A"), Color3.fromHex("#e7ff2f"))
+		Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(200, 200, 200))
 	}
 })
+
 local CombatTab = Window:Tab({Title = "Combat", Icon = "sword"})
 local ESPTab = Window:Tab({Title = "ESP", Icon = "eye"})
 
@@ -47,7 +85,8 @@ local function doNoRecoil()
 		pcall(function()
 			for _, tool in pairs(LocalPlayer.Backpack:GetChildren()) do
 				if tool:IsA("Tool") and (tool:FindFirstChild("Recoil") or tool:GetAttribute("Recoil")) then
-					if tool:FindFirstChild("Recoil") then tool.Recoil.Value = 0 end					if tool:GetAttribute("Recoil") then tool:SetAttribute("Recoil", 0) end
+					if tool:FindFirstChild("Recoil") then tool.Recoil.Value = 0 end
+					if tool:GetAttribute("Recoil") then tool:SetAttribute("Recoil", 0) end
 				end
 			end
 			for _, tool in pairs(LocalPlayer.Character:GetChildren()) do
@@ -57,69 +96,72 @@ local function doNoRecoil()
 				end
 			end
 		end)
-	end
-end
+	endend
+
 CombatTab:Toggle({
 	Title = "No Recoil (กันกล้องดีด)",
 	Default = false,
 	Callback = function(v)
 		NoRecoilEnabled = v
-		if v then task.spawn(doNoRecoil) end
+		if v then spawn(doNoRecoil) end
 	end
 })
 
 -------------------------------------------------
--- Silent Aim: ปรับปรุงความแม่นยำ + Prediction --
+-- Silent Aim: ยิงสลับจุด root กับ head -------
 -------------------------------------------------
 local SilentAimEnabled = false
 local FOVCircle = Drawing.new("Circle")
 FOVCircle.Radius = 120
 FOVCircle.Thickness = 2
 FOVCircle.Filled = false
-FOVCircle.Color = Color3.fromRGB(255,255,0)
+FOVCircle.Color = Color3.fromRGB(255, 255, 255)
 FOVCircle.Visible = false
 local showFov = false
 local TracerLine = Drawing.new("Line")
-TracerLine.Color = Color3.fromRGB(0,255,255)
+TracerLine.Color = Color3.fromRGB(255, 255, 255)
 TracerLine.Thickness = 2
 TracerLine.Visible = false
-local BulletSpeed = 1200 -- ปรับตามเกม (หน่วย studs/sec)
-local PrioritizeHead = true
 
 CombatTab:Toggle({
 	Title = "Enable Silent Aim",
 	Default = false,
 	Callback = function(v)
 		SilentAimEnabled = v
-		TracerLine.Visible = v and true
+		TracerLine.Visible = v and TracerLine.Visible
 	end
 })
+
 CombatTab:Toggle({
 	Title = "Show FOV Circle",
-	Default = false,	Callback = function(v)
+	Default = false,
+	Callback = function(v)
 		showFov = v
 		FOVCircle.Visible = v
 	end
 })
+
 CombatTab:Slider({
 	Title = "FOV Radius",
 	Step = 1,
 	Value = {Min = 50, Max = 500, Default = FOVCircle.Radius},
-	Callback = function(v) FOVCircle.Radius = tonumber(v) end
-})
-CombatTab:Toggle({
-	Title = "Prioritize Head",
-	Default = true,
-	Callback = function(v) PrioritizeHead = v end
+	Callback = function(v)		FOVCircle.Radius = tonumber(v)
+	end
 })
 
+-- --- ยิง root/head สลับแบบ random ---
+local lastSwitch = 0
+local lastTarget = nil
+local aimHead = true
+
 local function GetClosestTargetFOV()
-	local closest, shortest = nil, math.huge
+	local closest
+	local shortest = math.huge
 	local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-	for _,plr in ipairs(Players:GetPlayers()) do
+	for _, plr in pairs(Players:GetPlayers()) do
 		if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
-			local hrp = plr.Character.HumanoidRootPart
-			local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+			local root = plr.Character.HumanoidRootPart
+			local screenPos, onScreen = Camera:WorldToViewportPoint(root.Position)
 			local dist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
 			if onScreen and dist < FOVCircle.Radius and dist < shortest then
 				shortest = dist
@@ -130,38 +172,46 @@ local function GetClosestTargetFOV()
 	return closest
 end
 
-local function CalculatePrediction(target, myPos)
-	local char = target.Character
-	if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
-	local hrp = char.HumanoidRootPart
-	local velocity = hrp.Velocity
-	local distance = (myPos - hrp.Position).Magnitude
-	local travelTime = distance / BulletSpeed
-	return hrp.Position + velocity * travelTime
-end
-
 local send = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Send")
 local oldFire
 oldFire = hookfunction(send.FireServer, function(self, ...)
 	local args = {...}
 	if SilentAimEnabled then
-		local target = GetClosestTargetFOV()		if target and target.Character then
+		local target = GetClosestTargetFOV()
+		if target and target.Character then
 			local head = target.Character:FindFirstChild("Head")
 			local root = target.Character:FindFirstChild("HumanoidRootPart")
 			if head and root then
+				-- สลับ root <-> head ทุกการยิงหรือทุก 0.2 วิ random
+				local now = tick()
+				if target ~= lastTarget or (now - lastSwitch > 0.2 and math.random() > 0.5) then
+					aimHead = not aimHead
+					lastTarget = target
+					lastSwitch = now
+				end
+				local aimPos, inst
+				if aimHead then
+					aimPos = head.Position
+					inst = head
+				else
+					aimPos = root.Position					inst = root
+				end
+				args[4] = CFrame.new(math.huge, math.huge, math.huge, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+				args[5] = {[1]={[1]={["Instance"]=inst, ["Position"]=aimPos}}}
+				
+				-- Bullet Debug (ดำ-ขาว)
 				local myHead = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Head")
 				if myHead then
-					local predictedPos = CalculatePrediction(target, myHead.Position)
-					local aimPos = predictedPos or (PrioritizeHead and head.Position or root.Position)
-					local inst = PrioritizeHead and head or root
-
-					-- แก้ไขโครงสร้าง args ให้เสถียรและปลอดภัยต่อ Anti-Cheat
-					if typeof(args[4]) == "CFrame" then
-						args[4] = CFrame.new(aimPos)
-					end
-					if typeof(args[5]) == "table" then
-						args[5] = {[1]={[1]={["Instance"]=inst, ["Position"]=aimPos}}}
-					end
+					local dist = (aimPos - myHead.Position).Magnitude
+					local bullet = Instance.new("Part")
+					bullet.Anchored = true
+					bullet.CanCollide = false
+					bullet.Material = Enum.Material.Neon
+					bullet.Size = Vector3.new(0.1, 0.1, dist)
+					bullet.CFrame = CFrame.new(myHead.Position, aimPos) * CFrame.new(0, 0, -dist/2)
+					bullet.Color = aimHead and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(200, 200, 200)
+					bullet.Parent = workspace
+					Debris:AddItem(bullet, 1)
 				end
 			end
 		end
@@ -177,24 +227,25 @@ RunService.RenderStepped:Connect(function()
 		if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
 			local head = target.Character:FindFirstChild("Head")
 			local root = target.Character:FindFirstChild("HumanoidRootPart")
-			if head and root and myHead then
-				local predictedPos = CalculatePrediction(target, myHead.Position)
-				local aimPos = predictedPos or (PrioritizeHead and head.Position or root.Position)
-				local my2D = Vector2.new(Camera:WorldToViewportPoint(myHead.Position).X, Camera:WorldToViewportPoint(myHead.Position).Y)
-				local t2D = Vector2.new(Camera:WorldToViewportPoint(aimPos).X, Camera:WorldToViewportPoint(aimPos).Y)
-				local distFromCenter = (t2D - Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)).Magnitude
-				if not showFov or distFromCenter <= FOVCircle.Radius then
-					TracerLine.From = my2D
-					TracerLine.To = t2D
-					TracerLine.Visible = true
-				else
-					TracerLine.Visible = false
+			if head and root then
+				local aimPos = aimHead and head.Position or root.Position
+				if myHead then
+					local my2D = Vector2.new(Camera:WorldToViewportPoint(myHead.Position).X, Camera:WorldToViewportPoint(myHead.Position).Y)
+					local t2D = Vector2.new(Camera:WorldToViewportPoint(aimPos).X, Camera:WorldToViewportPoint(aimPos).Y)
+					local distFromCenter = (t2D - Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)).Magnitude
+					if not showFov or distFromCenter <= FOVCircle.Radius then
+						TracerLine.From = my2D
+						TracerLine.To = t2D
+						TracerLine.Visible = true
+					else
+						TracerLine.Visible = false
+					end
 				end
 			else
 				TracerLine.Visible = false
-			end
-		else
-			TracerLine.Visible = false		end
+			end		else
+			TracerLine.Visible = false
+		end
 	else
 		TracerLine.Visible = false
 	end
@@ -206,15 +257,21 @@ end)
 local boxESPEnabled = false
 local nameESPEnabled = false
 local espPlayers = {}
+
 ESPTab:Toggle({
 	Title = "Box ESP",
 	Default = false,
-	Callback = function(state) boxESPEnabled = state end
+	Callback = function(state)
+		boxESPEnabled = state
+	end
 })
+
 ESPTab:Toggle({
 	Title = "Name ESP",
 	Default = false,
-	Callback = function(state) nameESPEnabled = state end
+	Callback = function(state)
+		nameESPEnabled = state
+	end
 })
 
 local function createESP(player)
@@ -228,25 +285,30 @@ local function createESP(player)
 	nameText.Size = 16
 	nameText.Center = true
 	nameText.Outline = true
-	nameText.Color = Color3.fromRGB(255, 0, 0)
+	nameText.Color = Color3.fromRGB(255, 255, 255)
 	nameText.Visible = false
+	
 	for _, line in pairs(lines) do
-		line.Color = Color3.new(1, 1, 1)
+		line.Color = Color3.fromRGB(255, 255, 255)
 		line.Thickness = 1
 		line.Visible = false
-	end
+	end	
 	local drawings = {lines.top, lines.bottom, lines.left, lines.right, nameText}
+	
 	local conn = RunService.RenderStepped:Connect(function()
 		if not player.Character or not player.Character:FindFirstChild("Head") or not player.Character:FindFirstChild("HumanoidRootPart") then
 			for _, line in pairs(lines) do line.Visible = false end
 			nameText.Visible = false
 			return
 		end
+		
 		local head = player.Character.Head
-		local hrp = player.Character.HumanoidRootPart		local topWorld = head.Position + Vector3.new(0, 1, 0)
+		local hrp = player.Character.HumanoidRootPart
+		local topWorld = head.Position + Vector3.new(0, 1, 0)
 		local bottomWorld = hrp.Position - Vector3.new(0, 3.5, 0)
 		local top, onTop = Camera:WorldToViewportPoint(topWorld)
 		local bottom, onBottom = Camera:WorldToViewportPoint(bottomWorld)
+		
 		if onTop and onBottom and top.Z > 0 and bottom.Z > 0 then
 			local height = math.abs(top.Y - bottom.Y) * 1.2
 			local width = height / 1.5
@@ -256,6 +318,7 @@ local function createESP(player)
 			local tr = Vector2.new(x + width, y)
 			local bl = Vector2.new(x, y + height)
 			local br = Vector2.new(x + width, y + height)
+			
 			if boxESPEnabled then
 				lines.top.From = tl
 				lines.top.To = tr
@@ -269,6 +332,7 @@ local function createESP(player)
 			else
 				for _, line in pairs(lines) do line.Visible = false end
 			end
+			
 			if nameESPEnabled then
 				nameText.Text = player.Name
 				nameText.Position = Vector2.new(top.X, y - 16)
@@ -277,27 +341,38 @@ local function createESP(player)
 				nameText.Visible = false
 			end
 		else
-			for _, line in pairs(lines) do line.Visible = false end
-			nameText.Visible = false
+			for _, line in pairs(lines) do line.Visible = false end			nameText.Visible = false
 		end
 	end)
+	
 	espPlayers[player] = {conn = conn, drawings = drawings}
 end
 
 local function loadESP()
 	for _, player in pairs(Players:GetPlayers()) do
-		if player ~= LocalPlayer then createESP(player) end
+		if player ~= LocalPlayer then
+			createESP(player)
+		end
 	end
+	
 	Players.PlayerAdded:Connect(function(player)
 		if player ~= LocalPlayer then
-			player.CharacterAdded:Connect(function() wait(0.1) createESP(player) end)
+			player.CharacterAdded:Connect(function()
+				wait(0.1)
+				createESP(player)
+			end)
 		end
-	end)	Players.PlayerRemoving:Connect(function(player)
+	end)
+	
+	Players.PlayerRemoving:Connect(function(player)
 		if espPlayers[player] then
 			espPlayers[player].conn:Disconnect()
-			for _, drawing in pairs(espPlayers[player].drawings) do drawing:Remove() end
+			for _, drawing in pairs(espPlayers[player].drawings) do
+				drawing:Remove()
+			end
 			espPlayers[player] = nil
 		end
 	end)
 end
+
 loadESP()
