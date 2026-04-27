@@ -1,0 +1,1101 @@
+local Players = game:GetService("Players")
+local lp = Players.LocalPlayer
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+local PathfindingService = game:GetService("PathfindingService")
+local Debris = game:GetService("Debris")
+local RunService = game:GetService("RunService")
+
+local IMM = false
+local activeWaypoints = {}
+local arcVisuals = {}
+local frozenConn = nil
+local RETRIES = 3
+local WALK_SPEED = 35
+local CAR_SPEED = 75
+local AutoLock = true
+local DETECT_COUNT = 0
+local LAST_DETECT = 0
+
+local CFG = {
+   SmartBait = true,
+   SmartRod = true,
+   SmartPot = true,
+   AutoSell = false,
+   vehicleName = "Crown Victoria"
+}
+
+local COSTS = {
+   Baits = {
+   	WormtecRegular = 10,
+   	WormtecPro = 25,
+   	WormtecUltimate = 60,
+   	PrawntecRegular = 100,
+   	PrawntecPro = 250,
+   	PrawntecUltimate = 500
+   },
+   Rods = {
+   	RegularFishingRod = 100,
+   	FishingRodPro = 800,
+   	FishingRodAdvanced = 2300,
+   	FishingRodUltimate = 5000
+   }
+}
+
+local BAITS = {
+   "WormtecRegular","WormtecPro","WormtecUltimate",
+   "PrawntecRegular","PrawntecPro","PrawntecUltimate"
+}
+
+local RODS = {
+   "RegularFishingRod","FishingRodPro","FishingRodAdvanced","FishingRodUltimate"
+}
+
+local BUY_POS = Vector3.new(-89, 255, 128)
+local BUY_POS2 = Vector3.new(-135, 255, 154)
+
+local CNT
+
+local function CT()
+   for _, O in getgc(true) do
+   	if typeof(O) == "table" and rawget(O,"event") and rawget(O,"func") then
+   		CNT = O
+   		return
+   	end
+   end
+end
+
+CT()
+
+local function CR(R, ...)
+   if not CNT then return nil end
+   if not R then return nil end
+   local A = {...}
+   local S, X = pcall(function()
+   	if R:IsA("RemoteEvent") then
+   		CNT.event += 1
+   		R:FireServer(CNT.event, unpack(A))
+   	elseif R:IsA("RemoteFunction") then
+   		CNT.func += 1
+   		return R:InvokeServer(CNT.func, unpack(A))
+   	end
+   end)
+   if not S then return nil end
+   return X
+end
+
+local function getCNT()
+   local IG = lp.PlayerGui:FindFirstChild("Items")
+   local C = 0
+   if IG then
+   	local IH = IG:FindFirstChild("ItemsHolder")
+   	if IH then
+   		local ISF = IH:FindFirstChild("ItemsScrollingFrame")
+   		if ISF then
+   			for _ in ipairs(ISF:GetChildren()) do
+   				C += 1
+   			end
+   		end
+   	end
+   end
+   return C
+end
+
+local function getHRP()
+   local C = lp.Character
+   return C and C:FindFirstChild("HumanoidRootPart")
+end
+
+local function getHum()
+   local C = lp.Character
+   return C and C:FindFirstChildOfClass("Humanoid")
+end
+
+local function isA()
+   local C = lp.Character
+   if not C then return false end
+   local H = C:FindFirstChildOfClass("Humanoid")
+   return H and H.Health > 0
+end
+
+local function IV()
+   local H = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+   return H and H.SeatPart ~= nil
+end
+
+local function isG()
+   local H = getHRP()
+   if not H then return false end
+   local P = RaycastParams.new()
+   P.FilterDescendantsInstances = {lp.Character}
+   P.FilterType = Enum.RaycastFilterType.Exclude
+   return Workspace:Raycast(H.Position, Vector3.new(0,-4.5,0), P) ~= nil
+end
+
+local function wG()
+   local T = 0
+   while not isG() and T < 4 do
+   	task.wait(0.05)
+   	T += 0.05
+   end
+end
+
+local function uC()
+   if frozenConn then frozenConn:Disconnect() frozenConn = nil end
+   local H = getHum()
+   if H then H.WalkSpeed = 16 H.JumpPower = 50 H.AutoRotate = true end
+end
+
+local function fC()
+   if frozenConn then frozenConn:Disconnect() end
+   local H = getHum()
+   if H then H.WalkSpeed = 0 H.JumpPower = 0 H.AutoRotate = false end
+   frozenConn = RunService.Heartbeat:Connect(function()
+   	local HR = getHRP()
+   	if HR then
+   		HR.AssemblyLinearVelocity = Vector3.new(0, HR.AssemblyLinearVelocity.Y, 0)
+   		HR.AssemblyAngularVelocity = Vector3.zero
+   	end
+   end)
+end
+
+local function cA()
+   for _, V in pairs(arcVisuals) do
+   	if V and V.Parent then
+   		TweenService:Create(V, TweenInfo.new(0.2,Enum.EasingStyle.Quad), {Transparency=1,Size=Vector3.new(0.05,0.05,0.05)}):Play()
+   		Debris:AddItem(V, 0.25)
+   	end
+   end
+   arcVisuals = {}
+end
+
+local function cW()
+   for I, W in pairs(activeWaypoints) do
+   	if W.pt then W.pt:Cancel() end
+   	if W.ft then W.ft:Cancel() end
+   	if W.part and W.part.Parent then
+   		TweenService:Create(W.part, TweenInfo.new(0.2,Enum.EasingStyle.Quad), {Transparency=1,Size=Vector3.new(0.05,0.05,0.05)}):Play()
+   		Debris:AddItem(W.part, 0.25)
+   	end
+   	activeWaypoints[I] = nil
+   end
+end
+
+local function sAll()
+   IMM = false
+   cW()
+   cA()
+   uC()
+end
+
+local function dD()
+   local Map = Workspace:FindFirstChild("Map")
+   if not Map then return end
+   local count = 0
+   for _, Desc in ipairs(Map:GetDescendants()) do
+   	if Desc:IsA("Model") and Desc.Name:find("DoorSystem") then
+   		for _, P in ipairs(Desc:GetDescendants()) do
+   			if P:IsA("BasePart") then
+   				P.CanCollide = false
+   				count += 1
+   			end
+   		end
+   	end
+   end
+end
+
+local function wD()
+   local Map = Workspace:FindFirstChild("Map")
+   if not Map then return end
+   Map.DescendantAdded:Connect(function(O)
+   	if O:IsA("Model") and O.Name:find("DoorSystem") then
+   		for _, P in ipairs(O:GetDescendants()) do
+   			if P:IsA("BasePart") then P.CanCollide = false end
+   		end
+   	end
+   end)
+end
+
+local function GM()
+   local PG = lp:FindFirstChild("PlayerGui")
+   if not PG then return 0, 0 end
+   local BANK = 0
+   local HAND = 0
+   for _, SG in ipairs(PG:GetChildren()) do
+   	if not SG:IsA("ScreenGui") then continue end
+   	for _, Frame1 in ipairs(SG:GetChildren()) do
+   		if not Frame1:IsA("Frame") then continue end
+   		for _, Frame2 in ipairs(Frame1:GetChildren()) do
+   			if not Frame2:IsA("Frame") then continue end
+   			local Options = Frame2:FindFirstChild("Options")
+   			if not Options or not Options:IsA("Frame") then continue end
+   			for _, Child in ipairs(Options:GetChildren()) do
+   				if not Child:IsA("TextLabel") then continue end
+   				local TXT = Child.Text or ""
+   				if TXT:find("Bank Balance:") then
+   					local NUM = TXT:gsub(".*Bank Balance:%s*", ""):gsub("[%s$,]", ""):match("%d+")
+   					if NUM then BANK = tonumber(NUM) or 0 end
+   				end
+   				if TXT:find("Hand Balance:") then
+   					local NUM = TXT:gsub(".*Hand Balance:%s*", ""):gsub("[%s$,]", ""):match("%d+")
+   					if NUM then HAND = tonumber(NUM) or 0 end
+   				end
+   			end
+   		end
+   	end
+   end
+   return BANK, HAND
+end
+
+local function GL()
+   local SG = lp.PlayerGui:FindFirstChild("Skills")
+   if not SG then return 1 end
+   local SH = SG:FindFirstChild("SkillsHolder")
+   if not SH then return 1 end
+   local SF = SH:FindFirstChild("SkillsScrollingFrame")
+   if not SF then return 1 end
+   for _, IB in ipairs(SF:GetChildren()) do
+   	if IB:IsA("ImageButton") or IB:IsA("Frame") then
+   		local ST = IB:FindFirstChild("SkillTitle")
+   		if ST and ST:IsA("TextLabel") and ST.Text:find("Fishing") then
+   			local tmp = ST.Text:gsub("Fishing:",""):gsub("%s","")
+   			local LVL = tonumber(tmp) or 1
+   			return LVL
+   		end
+   	end
+   end
+   return 1
+end
+
+local function getItemName(frame)
+   if not frame then return nil end
+   local IN_ = frame:FindFirstChild("ItemName")
+   if IN_ and IN_:IsA("TextLabel") then
+   	return IN_.Text
+   end
+   return nil
+end
+
+local function getItemType(frame)
+   if not frame then return nil end
+   return frame:GetAttribute("ItemType")
+end
+
+local function getItemAmmo(frame)
+   if not frame then return nil end
+   return frame:GetAttribute("ammo")
+end
+
+local function isBait(itemType, itemName)
+   if not itemType and not itemName then return false end
+   local it = (itemType or ""):lower()
+   local nm = (itemName or ""):lower()
+   if it:find("bait") or it:find("ammo") then return true end
+   if nm:find("wormtec") or nm:find("prawntec") or nm:find("bait") then return true end
+   return false
+end
+
+local function isRod(itemType, itemName)
+   if not itemType and not itemName then return false end
+   local it = (itemType or ""):lower()
+   local nm = (itemName or ""):lower()
+   if it:find("rod") then return true end
+   if nm:find("rod") or nm:find("fishing") then return true end
+   return false
+end
+
+local function getBaitRank(itemName)
+   if not itemName then return 0 end
+   local nm = itemName:lower()
+   if nm:find("ultimate") then
+   	if nm:find("prawn") or nm:find("prawntec") then return 6 end
+   	return 3
+   end
+   if nm:find("pro") then
+   	if nm:find("prawn") or nm:find("prawntec") then return 5 end
+   	return 2
+   end
+   if nm:find("regular") then
+   	if nm:find("prawn") or nm:find("prawntec") then return 4 end
+   	return 1
+   end
+   return 0
+end
+
+local function getRodRank(itemName)
+   if not itemName then return 0 end
+   local nm = itemName:lower()
+   if nm:find("ultimate") then return 4 end
+   if nm:find("advanced") then return 3 end
+   if nm:find("pro") then return 2 end
+   if nm:find("regular") then return 1 end
+   return 0
+end
+
+local function GI()
+   local IG = lp.PlayerGui:FindFirstChild("Items")
+   if not IG then return nil, nil, nil, 0, 0 end
+   local IH = IG:FindFirstChild("ItemsHolder")
+   if not IH then return nil, nil, nil, 0, 0 end
+   local ISF = IH:FindFirstChild("ItemsScrollingFrame")
+   if not ISF then return nil, nil, nil, 0, 0 end
+
+   local BAIT, ROD, CAR = nil, nil, nil
+   local BAITN, RODN = 0, 0
+
+   for _, F in ipairs(ISF:GetChildren()) do
+   	if F:IsA("Frame") or F:IsA("ImageLabel") or F:IsA("ImageButton") then
+   		local itemType = getItemType(F)
+   		local itemName = getItemName(F)
+   		local ammo = getItemAmmo(F)
+
+   		if isBait(itemType, itemName) then
+   			local rank = getBaitRank(itemName)
+   			if rank > BAITN then
+   				BAITN = rank
+   				BAIT = F.Name
+   			end
+   		elseif isRod(itemType, itemName) then
+   			local rank = getRodRank(itemName)
+   			if rank > RODN then
+   				RODN = rank
+   				ROD = F.Name
+   			end
+   		elseif itemType == "Car" or itemType == "bike" or itemType == "BMX" or itemType == "Vehicle" then
+   			CAR = F.Name
+   		end
+   	end
+   end
+
+   return BAIT, ROD, CAR, BAITN, RODN
+end
+
+local function EQ(ID)
+   if not ID then return false end
+   local R = ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("Get")
+   if not R then return false end
+   local C = getCNT()
+   local RSLT = CR(R, "toggle_equip_item", ID)
+   return RSLT ~= nil
+end
+
+local function CB(B)
+   local R = ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("Get")
+   if not R then return false end
+   local C = getCNT()
+   local SZ = Workspace:FindFirstChild("ShopZone_Hardware")
+   if not SZ then return false end
+   local RSLT = CR(R, C, "purchase_consumable", SZ, B)
+   task.wait(0.5)
+   return RSLT ~= nil
+end
+
+local function EX()
+   local R = ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("Get")
+   if not R then return false end
+   local RSLT = CR(R, "exit_seat")
+   task.wait(0.5)
+   return RSLT ~= nil
+end
+
+local function LK(V)
+   if not AutoLock then return false end
+   if not V then return false end
+   local R = ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("Send")
+   if not R then return false end
+   local C = getCNT()
+   return CR(R, C, "lock_vehicle", V, true) ~= nil
+end
+
+local function ATM_DEPOSIT(AMT)
+   local R = ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("Get")
+   if not R then return false end
+   local C = getCNT()
+   local RSLT = CR(R, C, "atm_deposit", AMT)
+   task.wait(0.5)
+   return RSLT ~= nil
+end
+
+local function ATM_WITHDRAW(AMT)
+   local R = ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("Get")
+   if not R then return false end
+   local C = getCNT()
+   local RSLT = CR(R, C, "atm_withdraw", AMT)
+   task.wait(0.5)
+   return RSLT ~= nil
+end
+
+local function GV()
+   local VF = Workspace:FindFirstChild("Vehicles")
+   if not VF then return nil end
+   for _, M in ipairs(VF:GetChildren()) do
+   	local O = M:GetAttribute("OwnerUserId")
+   	if O and O == lp.UserId then
+   		return M
+   	end
+   end
+   return nil
+end
+
+local function GP(V)
+   if not V then return nil end
+   local P = V.PrimaryPart
+   if P then return P end
+   local C = V:FindFirstChild("Chassis")
+   if C and C:IsA("BasePart") then V.PrimaryPart = C return C end
+   for _, X in ipairs(V:GetDescendants()) do
+   	if X:IsA("BasePart") then V.PrimaryPart = X return X end
+   end
+   return nil
+end
+
+local function GD(V)
+   if not V then return nil end
+   local P = GP(V)
+   if not P then return nil end
+   local A = P:FindFirstChild("DrivePromptAttachment")
+   if A then
+   	local DP = A:FindFirstChild("DrivePrompt")
+   	if DP then return DP end
+   end
+   local DP = P:FindFirstChild("DrivePrompt")
+   if DP then return DP end
+   return nil
+end
+
+local function SPV(V)
+   if not V then return end
+   for _, X in ipairs(V:GetDescendants()) do
+   	if X:IsA("BasePart") then
+   		X.Velocity = Vector3.zero
+   		X.RotVelocity = Vector3.zero
+   		X.AssemblyLinearVelocity = Vector3.zero
+   		X.AssemblyAngularVelocity = Vector3.zero
+   	end
+   end
+end
+
+local function IU(V)
+   if not V then return false end
+   for _, S in ipairs(V:GetDescendants()) do
+   	if S:IsA("VehicleSeat") or S:IsA("Seat") then
+   		if S.Occupant and S.Occupant ~= lp.Character:FindFirstChildOfClass("Humanoid") then
+   			return true
+   		end
+   	end
+   end
+   return false
+end
+
+local function TV(V)
+   if not V then return false end
+   local P = GP(V)
+   if not P then return false end
+   SPV(V)
+   local H = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+   if not H then return false end
+   V:SetPrimaryPartCFrame(CFrame.new(H.Position + Vector3.new(0,5,0)))
+   return true
+end
+
+local function sD(P, A)
+   local PT = Instance.new("Part")
+   PT.Size = Vector3.new(0.5,0.5,0.5)
+   PT.Shape = Enum.PartType.Ball
+   PT.Position = P
+   PT.Anchored = true
+   PT.CanCollide = false
+   PT.CastShadow = false
+   PT.Material = Enum.Material.Neon
+   PT.Color = Color3.fromHSV(0.55 + 0.2*A, 1, 1)
+   PT.Transparency = 0.2
+   PT.Parent = Workspace
+   TweenService:Create(PT, TweenInfo.new(0.6,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut,-1,true), {Transparency=0.7,Size=Vector3.new(0.3,0.3,0.3)}):Play()
+   table.insert(arcVisuals, PT)
+end
+
+local function rW(I)
+   local W = activeWaypoints[I]
+   if not W then return end
+   if W.pt then W.pt:Cancel() end
+   if W.ft then W.ft:Cancel() end
+   if W.part and W.part.Parent then
+   	TweenService:Create(W.part, TweenInfo.new(0.15,Enum.EasingStyle.Quad), {Transparency=1,Size=Vector3.new(0.05,0.05,0.05)}):Play()
+   	Debris:AddItem(W.part, 0.2)
+   end
+   activeWaypoints[I] = nil
+end
+
+local function sW(P, I, T, ISCAR)
+   local PT = Instance.new("Part")
+   PT.Size = ISCAR and Vector3.new(2.5,0.4,2.5) or Vector3.new(1.4,0.25,1.4)
+   PT.Shape = Enum.PartType.Cylinder
+   PT.CFrame = CFrame.new(P) * CFrame.Angles(0,0,math.pi/2)
+   PT.Anchored = true
+   PT.CanCollide = false
+   PT.CastShadow = false
+   PT.Material = Enum.Material.Neon
+   PT.Color = ISCAR and Color3.fromHSV(0.6+0.2*(I/math.max(T,1)),1,1) or Color3.fromHSV(0.33*(1-I/math.max(T,1)),1,1)
+   PT.Transparency = 0.3
+   PT.Parent = Workspace
+   local T1 = TweenService:Create(PT, TweenInfo.new(0.55,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut,-1,true), {Transparency=0.75})
+   local T2 = TweenService:Create(PT, TweenInfo.new(0.75,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut,-1,true), {CFrame=CFrame.new(P+Vector3.new(0,0.4,0))*CFrame.Angles(0,0,math.pi/2)})
+   T1:Play() T2:Play()
+   activeWaypoints[I] = {part=PT, pt=T1, ft=T2}
+end
+
+local function bV(W, ISCAR)
+   cW() cA()
+   for I, WP in ipairs(W) do sW(WP.Position+Vector3.new(0,0.6,0), I, #W, ISCAR) end
+end
+
+local function cP(F, T)
+   local P = PathfindingService:CreatePath({AgentRadius=2,AgentHeight=5,AgentCanJump=true,AgentCanClimb=false,WaypointSpacing=4,Costs={Water=100}})
+   local O = pcall(function() P:ComputeAsync(F,T) end)
+   if not O or P.Status == Enum.PathStatus.NoPath then return nil end
+   return P:GetWaypoints()
+end
+
+local function mO(F, T)
+   local P = RaycastParams.new()
+   P.FilterDescendantsInstances = {lp.Character}
+   P.FilterType = Enum.RaycastFilterType.Exclude
+   local M = math.max(F.Y,T.Y)
+   for I = 0, 8 do
+   	local A = I/8
+   	local MD = F:Lerp(T,A)
+   	local U = Workspace:Raycast(MD, Vector3.new(0,80,0), P)
+   	if U and MD.Y+U.Distance > M then M = MD.Y+U.Distance end
+   	local D = Workspace:Raycast(MD+Vector3.new(0,80,0), Vector3.new(0,-80,0), P)
+   	if D and D.Position.Y > M then M = D.Position.Y end
+   end
+   return M
+end
+
+local function bA(F, T, Y)
+   local P = {}
+   for I = 0, 18 do
+   	local A = I/18
+   	local X = F.X+(T.X-F.X)*A
+   	local Z = F.Z+(T.Z-F.Z)*A
+   	local B = F.Y+(T.Y-F.Y)*A
+   	local R = B+(Y-math.max(F.Y,T.Y))*math.sin(A*math.pi)
+   	table.insert(P, Vector3.new(X,R,Z))
+   end
+   return P
+end
+
+local function fO(F, T, VEH)
+   cA()
+   local P = VEH and GP(VEH) or getHRP()
+   if not P then return false end
+   local O = mO(F,T)
+   local Y = O+7
+   local AP = bA(F,T,Y)
+   for I, PT in ipairs(AP) do sD(PT, I/#AP) end
+   for I, PT in ipairs(AP) do
+   	if not getgenv().AutoFarm or not isA() then cA() return false end
+   	local N = VEH and GP(VEH) or getHRP()
+   	if not N then cA() return false end
+   	local S = N.Position
+   	local SPD = VEH and CAR_SPEED or WALK_SPEED
+   	local ST = math.max(1, math.floor((PT-S).Magnitude/(SPD/60)))
+   	for J = 1, ST do
+   		if not getgenv().AutoFarm or not isA() then cA() return false end
+   		local NN = VEH and GP(VEH) or getHRP()
+   		if not NN then cA() return false end
+   		local IP = S:Lerp(PT, J/ST)
+   		local L = Vector3.new(PT.X-NN.Position.X, 0, PT.Z-NN.Position.Z)
+   		if L.Magnitude > 0.01 then
+   			if VEH then VEH:SetPrimaryPartCFrame(CFrame.lookAt(IP, IP+L.Unit))
+   			else NN.CFrame = CFrame.new(IP, IP+L.Unit) end
+   		else
+   			if VEH then VEH:SetPrimaryPartCFrame(CFrame.new(IP))
+   			else NN.CFrame = CFrame.new(IP) end
+   		end
+   		RunService.Heartbeat:Wait()
+   	end
+   	if arcVisuals[I] and arcVisuals[I].Parent then
+   		TweenService:Create(arcVisuals[I], TweenInfo.new(0.15,Enum.EasingStyle.Quad), {Transparency=1,Size=Vector3.new(0.05,0.05,0.05)}):Play()
+   		Debris:AddItem(arcVisuals[I], 0.2)
+   		arcVisuals[I] = nil
+   	end
+   end
+   cA()
+   return true
+end
+
+local function sT(T, SPD, VEH)
+   local P = VEH and GP(VEH) or getHRP()
+   if not P then return false end
+   local SX, SZ = P.Position.X, P.Position.Z
+   local EX_, EZ_ = T.X, T.Z
+   local D = math.sqrt((EX_-SX)^2+(EZ_-SZ)^2)
+   local ST = math.max(1, math.floor(D/(SPD/60)))
+   local LX, LZ = EX_-SX, EZ_-SZ
+   for I = 1, ST do
+   	if not getgenv().AutoFarm or not isA() then return false end
+   	local N = VEH and GP(VEH) or getHRP()
+   	if not N then return false end
+   	if not VEH and not isG() then wG() if not isA() then return false end end
+   	local A = I/ST
+   	local IP = Vector3.new(SX+(EX_-SX)*A, N.Position.Y, SZ+(EZ_-SZ)*A)
+   	local LD = Vector3.new(LX,0,LZ)
+   	if LD.Magnitude > 0.01 then
+   		if VEH then VEH:SetPrimaryPartCFrame(CFrame.lookAt(IP, IP+LD.Unit))
+   		else N.CFrame = CFrame.new(IP, IP+LD.Unit) end
+   	else
+   		if VEH then VEH:SetPrimaryPartCFrame(CFrame.new(IP))
+   		else N.CFrame = CFrame.new(IP) end
+   	end
+   	RunService.Heartbeat:Wait()
+   end
+   local F = VEH and GP(VEH) or getHRP()
+   if F then
+   	local FP = Vector3.new(EX_, F.Position.Y, EZ_)
+   	local LD = Vector3.new(LX,0,LZ)
+   	if LD.Magnitude > 0.01 then
+   		if VEH then VEH:SetPrimaryPartCFrame(CFrame.lookAt(FP, FP+LD.Unit))
+   		else F.CFrame = CFrame.new(FP, FP+LD.Unit) end
+   	else
+   		if VEH then VEH:SetPrimaryPartCFrame(CFrame.new(FP))
+   		else F.CFrame = CFrame.new(FP) end
+   	end
+   end
+   return true
+end
+
+local function CK()
+   local NG = lp.PlayerGui:FindFirstChild("Notifications")
+   if not NG then return false end
+   local NF = NG:FindFirstChild("Frame")
+   if not NF then return false end
+   for _, TL in ipairs(NF:GetDescendants()) do
+   	if TL:IsA("TextLabel") then
+   		local TXT = TL.Text
+   		if TXT == "Anti noclip triggered" or TXT == "Fly detected" or TXT == "Teleport detected" then
+   			return true
+   		end
+   	end
+   end
+   return false
+end
+
+local function HD()
+   if not CK() then return end
+   local NOW = tick()
+   if NOW - LAST_DETECT < 10 then
+   	DETECT_COUNT += 1
+   else
+   	DETECT_COUNT = 1
+   end
+   LAST_DETECT = NOW
+   if DETECT_COUNT >= 3 then
+   	cW()
+   	cA()
+   	uC()
+   	if IV() then
+   		EX()
+   		task.wait(1.5)
+   	end
+   	DETECT_COUNT = 0
+   	return
+   end
+   if DETECT_COUNT == 2 then
+   	cW()
+   	cA()
+   	uC()
+   	if IV() then
+   		EX()
+   		task.wait(1)
+   	end
+   	local V = GV()
+   	if V then
+   		TV(V)
+   		task.wait(0.3)
+   		EV(V)
+   	end
+   	return
+   end
+   cW()
+   cA()
+   uC()
+   task.wait(2)
+end
+
+local function MTP(T, U, VEH)
+   if not getgenv().AutoFarm or IMM then return end
+   if not isA() then return end
+   HD()
+   if not getgenv().AutoFarm then return end
+   IMM = true
+   cW() cA() fC() dD()
+   local function A(RR)
+   	if not getgenv().AutoFarm or not isA() then sAll() return end
+   	HD()
+   	if not getgenv().AutoFarm then sAll() return end
+   	local H = VEH and GP(VEH) or getHRP()
+   	if not H then sAll() return end
+   	local D = Vector3.new(T.X, U and T.Y or H.Position.Y, T.Z)
+   	local W = cP(H.Position, D)
+   	if not W then
+   		if RR > 0 then task.wait(0.05) A(RR-1)
+   		else fO(H.Position, D, VEH) sAll() end
+   		return
+   	end
+   	bV(W, VEH ~= nil)
+   	local DR = false
+   	for I, WP in ipairs(W) do
+   		if not getgenv().AutoFarm or not isA() then sAll() return end
+   		HD()
+   		if not getgenv().AutoFarm then sAll() return end
+   		local C = VEH and GP(VEH) or getHRP()
+   		if not C then break end
+   		if not VEH and not isG() then wG() if not isA() then sAll() return end end
+   		local D2 = Vector2.new(C.Position.X-WP.Position.X, C.Position.Z-WP.Position.Z).Magnitude
+   		if I > 1 and D2 > 10 then DR = true break end
+   		local O
+   		if WP.Action == Enum.PathWaypointAction.Jump then
+   			local N = W[I+1]
+   			O = N and fO(C.Position, N.Position, VEH) or true
+   		else
+   			O = sT(WP.Position, VEH and CAR_SPEED or WALK_SPEED, VEH)
+   		end
+   		rW(I)
+   		if not O then DR = true break end
+   		RunService.Heartbeat:Wait()
+   	end
+   	if DR then cW() cA() task.wait(0.03) A(RETRIES) return end
+   	local E = VEH and GP(VEH) or getHRP()
+   	if E and isA() then
+   		if VEH then VEH:SetPrimaryPartCFrame(CFrame.new(T.X, E.Position.Y, T.Z))
+   		else E.CFrame = CFrame.new(T.X, E.Position.Y, T.Z) end
+   	end
+   	sAll()
+   end
+   A(RETRIES)
+end
+
+local function EV(V)
+   if not V then return false end
+   if IV() then return true end
+   local P = GP(V)
+   local DP = GD(V)
+   if not P then return false end
+   local D = (getHRP().Position - P.Position).Magnitude
+   if D > 5 then
+   	local HRP = getHRP()
+   	if HRP then
+   		HRP.CFrame = CFrame.new(P.Position + Vector3.new(0,3,0))
+   	end
+   	task.wait(0.2)
+   end
+   if DP and DP:IsA("ProximityPrompt") then pcall(function() fireproximityprompt(DP) end) end
+   task.wait(0.5)
+   return IV()
+end
+
+local function SC()
+   local IG = lp.PlayerGui:FindFirstChild("Items")
+   if not IG then return false end
+   local IH = IG:FindFirstChild("ItemsHolder")
+   if not IH then return false end
+   local ISF = IH:FindFirstChild("ItemsScrollingFrame")
+   if not ISF then return false end
+   local carUUID = nil
+   for _, F in ipairs(ISF:GetChildren()) do
+   	if F:IsA("Frame") or F:IsA("ImageLabel") or F:IsA("ImageButton") then
+   		local IT = F:GetAttribute("ItemType")
+   		local IN_ = F:FindFirstChild("ItemName")
+   		local NM = (IN_ and IN_:IsA("TextLabel")) and IN_.Text or ""
+   		if IT == "Car" or IT == "bike" or IT == "BMX" or IT == "Vehicle" then
+   			if NM:lower():find(CFG.vehicleName:lower()) or F.Name:lower():find(CFG.vehicleName:lower()) then
+   				carUUID = F.Name
+   				break
+   			end
+   		end
+   	end
+   end
+   if not carUUID then return false end
+   local broken = false
+   local itemFrame = ISF:FindFirstChild(carUUID)
+   if itemFrame then
+   	local destroyedIcon = itemFrame:FindFirstChild("DestroyedItemIcon")
+   	if destroyedIcon and destroyedIcon.Visible == true then
+   		broken = true
+   	end
+   end
+   if broken then
+   	local R = ReplicatedStorage:WaitForChild("Remotes"):FindFirstChild("Get")
+   	if R then
+   		CR(R, "repair_vehicle", carUUID)
+   		task.wait(0.5)
+   	end
+   end
+   local RSLT = EQ(carUUID)
+   if not RSLT then return false end
+   for i = 1, 20 do
+   	task.wait(0.3)
+   	local VF = Workspace:FindFirstChild("Vehicles")
+   	if VF then
+   		for _, M in ipairs(VF:GetChildren()) do
+   			local O = M:GetAttribute("OwnerUserId")
+   			if O and O == lp.UserId then
+   				return true
+   			end
+   		end
+   	end
+   end
+   return false
+end
+
+local function SP()
+   local L = GL()
+   if L >= 1 and L <= 9 then return Vector3.new(223,261,-837)
+   elseif L >= 10 and L <= 39 then return Vector3.new(0,0,0)
+   elseif L >= 40 and L <= 69 then return Vector3.new(-473,262,947)
+   elseif L >= 70 then return Vector3.new(70,264,903) end
+   return nil
+end
+
+local function FIND_ATM()
+   local ATMs = Workspace:FindFirstChild("Map")
+   	and Workspace.Map:FindFirstChild("Props")
+   	and Workspace.Map.Props:FindFirstChild("ATMs")
+   if not ATMs then return nil end
+   local HRP = getHRP()
+   if not HRP then return nil end
+   local BEST = nil
+   local BESTD = math.huge
+   for _, ATM in ipairs(ATMs:GetChildren()) do
+   	if ATM:IsA("Model") then
+   		local dis = ATM:GetAttribute("disabled")
+   		local hkr = ATM:GetAttribute("hacker")
+   		if not dis and (hkr == nil or hkr == "") then
+   			local PP = ATM.PrimaryPart or ATM:FindFirstChildWhichIsA("BasePart")
+   			if PP then
+   				local D = (PP.Position - HRP.Position).Magnitude
+   				if D < BESTD then
+   					BESTD = D
+   					BEST = ATM
+   				end
+   			end
+   		end
+   	end
+   end
+   return BEST
+end
+
+local function GO_ATM_WITHDRAW(NEEDED)
+   local BANK, HAND = GM()
+   if HAND >= NEEDED then return true end
+   local SHORT = NEEDED - HAND
+   if BANK < SHORT then return false end
+   local ATM = FIND_ATM()
+   if not ATM then return false end
+   local PP = ATM.PrimaryPart or ATM:FindFirstChildWhichIsA("BasePart")
+   if not PP then return false end
+   if IV() then
+   	EX()
+   	task.wait(0.5)
+   end
+   local HRP = getHRP()
+   if HRP then
+   	HRP.CFrame = CFrame.new(PP.Position + Vector3.new(0,0,3))
+   end
+   task.wait(0.5)
+   local Prox = ATM:FindFirstChildWhichIsA("ProximityPrompt", true)
+   if Prox then pcall(function() fireproximityprompt(Prox) end) task.wait(0.5) end
+   ATM_WITHDRAW(SHORT)
+   task.wait(0.3)
+   local _, NEWHAND = GM()
+   return NEWHAND >= NEEDED
+end
+
+local function ENSURE_HAND(NEEDED)
+   local BANK, HAND = GM()
+   if HAND >= NEEDED then return true end
+   local TOTAL = HAND + BANK
+   if TOTAL < NEEDED then return false end
+   return GO_ATM_WITHDRAW(NEEDED)
+end
+
+local function HAVE_BAIT_AND_ROD()
+   local B, R, _, BN, RN = GI()
+   local L = GL()
+   local TBI, TRI = 0, 0
+   if L >= 1 and L <= 7 then TBI = 1
+   elseif L >= 8 and L <= 14 then TBI = 2
+   elseif L >= 15 and L <= 24 then TBI = 3
+   elseif L >= 25 and L <= 29 then TBI = 4
+   elseif L >= 30 and L <= 44 then TBI = 5
+   elseif L >= 45 then TBI = 6 end
+   if L >= 1 and L <= 19 then TRI = 1
+   elseif L >= 20 and L <= 34 then TRI = 2
+   elseif L >= 35 and L <= 59 then TRI = 3
+   elseif L >= 60 then TRI = 4 end
+   local hasBait = B ~= nil and BN ~= nil and BN >= TBI
+   local hasRod = R ~= nil and RN ~= nil and RN >= TRI
+   return hasBait, hasRod
+end
+
+local function BB()
+   local L = GL()
+   local B, _, _, BN = GI()
+   local TB, TBI, TC
+   if L >= 1 and L <= 7 then TB,TBI,TC = "WormtecRegular", 1, 10
+   elseif L >= 8 and L <= 14 then TB,TBI,TC = "WormtecPro", 2, 25
+   elseif L >= 15 and L <= 24 then TB,TBI,TC = "WormtecUltimate", 3, 60
+   elseif L >= 25 and L <= 29 then TB,TBI,TC = "PrawntecRegular", 4, 100
+   elseif L >= 30 and L <= 44 then TB,TBI,TC = "PrawntecPro", 5, 250
+   elseif L >= 45 then TB,TBI,TC = "PrawntecUltimate", 6, 500 end
+   if not TB then return false end
+   if B and BN and BN >= TBI then
+   	EQ(B)
+   	return true
+   end
+   if not ENSURE_HAND(TC) then return false end
+   if IV() then
+   	local CV = GV()
+   	if CV and GP(CV) then
+   		local PP = GP(CV)
+   		local HRP = getHRP()
+   		if HRP and PP then
+   			HRP.CFrame = CFrame.new(PP.Position + Vector3.new(0,5,0))
+   		end
+   	end
+   	task.wait(0.3)
+   	EX()
+   	task.wait(0.5)
+   end
+   local HRP = getHRP()
+   if HRP then
+   	HRP.CFrame = CFrame.new(BUY_POS)
+   end
+   task.wait(0.3)
+   return CB(TB)
+end
+
+local function BR()
+   local L = GL()
+   local _, R, _, _, RN = GI()
+   local TR, TRI, TC
+   if L >= 1 and L <= 19 then TR,TRI,TC = "RegularFishingRod", 1, 100
+   elseif L >= 20 and L <= 34 then TR,TRI,TC = "FishingRodPro", 2, 800
+   elseif L >= 35 and L <= 59 then TR,TRI,TC = "FishingRodAdvanced", 3, 2300
+   elseif L >= 60 then TR,TRI,TC = "FishingRodUltimate", 4, 5000 end
+   if not TR then return false end
+   if R and RN and RN >= TRI then
+   	EQ(R)
+   	return true
+   end
+   if not ENSURE_HAND(TC) then return false end
+   if IV() then
+   	local CV = GV()
+   	if CV and GP(CV) then
+   		local PP = GP(CV)
+   		local HRP = getHRP()
+   		if HRP and PP then
+   			HRP.CFrame = CFrame.new(PP.Position + Vector3.new(0,5,0))
+   		end
+   	end
+   	task.wait(0.3)
+   	EX()
+   	task.wait(0.5)
+   end
+   local HRP = getHRP()
+   if HRP then
+   	HRP.CFrame = CFrame.new(BUY_POS)
+   end
+   task.wait(0.3)
+   return CB(TR)
+end
+
+local function equipFishingGear()
+   local BAIT, ROD, _, _, _ = GI()
+   if BAIT then EQ(BAIT) end
+   if ROD then EQ(ROD) end
+end
+
+local function wDeath()
+   local C = lp.Character or lp.CharacterAdded:Wait()
+   C:WaitForChild("Humanoid").Died:Connect(function()
+   	getgenv().AutoFarm = false
+   	sAll()
+   end)
+   lp.CharacterAdded:Connect(function()
+   	task.wait(1)
+   	dD()
+   	wDeath()
+   end)
+end
+
+local function AF()
+   local readyBait, readyRod = false, false
+   local buyAttempts = 0
+   repeat
+   	buyAttempts += 1
+   	if CFG.SmartBait then BB() end
+   	if CFG.SmartRod then BR() end
+   	task.wait(0.5)
+   	readyBait, readyRod = HAVE_BAIT_AND_ROD()
+   	if buyAttempts >= 5 then break end
+   until readyBait and readyRod
+   if not readyBait or not readyRod then return end
+   equipFishingGear()
+   local FP = CFG.SmartPot and SP() or nil
+   local S = FP and {FP} or {Vector3.new(-84,255,180)}
+   local V = GV()
+   if V and not IU(V) then
+   	local P = GP(V)
+   	if P then
+   		if (P.Position - getHRP().Position).Magnitude >= 3 then TV(V) task.wait(0.3) end
+   		EV(V)
+   		LK(V)
+   	end
+   else
+   	SC()
+   	task.wait(1)
+   	V = GV()
+   	if V then EV(V) LK(V) end
+   end
+   local SI = 1
+   while getgenv().AutoFarm do
+   	local IVeh = IV()
+   	local CV = GV()
+   	if not IVeh then
+   		if not CV or IU(CV) then
+   			SC()
+   			task.wait(1)
+   			CV = GV()
+   		end
+   		if CV then
+   			local P = GP(CV)
+   			if P and (P.Position - getHRP().Position).Magnitude >= 3 then TV(CV) task.wait(0.3) end
+   			EV(CV)
+   			LK(CV)
+   		end
+   		task.wait(0.5)
+   		continue
+   	end
+   	local T = S[SI]
+   	SI = (SI % #S) + 1
+   	if not getgenv().AutoFarm then break end
+   	if not IV() then continue end
+   	local HRP = getHRP()
+   	if HRP and CV and GP(CV) then
+   		local PP = GP(CV)
+   		PP.CFrame = CFrame.new(T)
+   	end
+   	task.wait(2)
+   end
+end
+
+wDeath()
+wD()
+dD()
+
+getgenv().AutoFarm = true
+
+AF()
