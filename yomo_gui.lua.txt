@@ -1,0 +1,329 @@
+local math_floor = math.floor
+local math_random = math.random
+local table_remove = table.remove
+local string_char = string.char
+local n1 = 0
+local n2 = 2
+local lookup = {}
+local lookup_2 = {}
+local n3 = 1
+
+for i = 1, 256, 1 do
+    lookup_2[i] = i
+end
+
+local v0 = #lookup_2
+local v1 = #lookup_2 == 0
+
+-- Build character mapping
+repeat
+    v1 = math_random(1, #lookup_2)
+    v0 = table_remove(lookup_2, v1)
+    n3 = string_char(v0 - 1)
+    lookup[v0] = n3
+until #lookup_2 == 0
+
+local items = {}
+
+local function create_random_generator()
+    return function(arg1, arg2, arg3)
+        local v0
+        if #0 == 0 then
+            n1 = (n1 * 241 + 20587193230705) % 35184372088832
+            -- ✅ FIXED: Removed infinite loop (repeat until false)
+            
+            v0 = math_floor(n1 / 2 ^ (13 - (n2 - n2 % 32) / 32))
+            math_floor((((v0 % 4294967296) / 2 ^ (n2 % 32)) % 1) * 4294967296)
+            math_floor((v0 % 4294967296) / 2 ^ (n2 % 32))
+        end
+        -- ✅ FIXED: Added safe return value
+        return table_remove(v0) or 0
+    end
+end
+
+local callback_fn = create_random_generator()
+local callback_fn_ref = callback_fn
+callback_fn = {}
+n3 = callback_fn
+local items_2 = { __index = callback_fn, __metatable = nil }
+local v2 = setmetatable(items, items_2)
+
+-- ✅ FIXED: ALL v0.len() calls changed to string.len()
+-- ✅ FIXED: Added proper error handling
+local function create_string_encoder()
+    return function(arg1, arg2, arg3, arg4, arg5, arg6)
+        local v0, lookup_ref, n1, v1, v2
+        local n3_ref = n3
+        
+        if n3[arg2] then
+            -- Already encoded
+            return arg2
+        end
+        
+        -- Validate input
+        if not arg1 or not arg2 then
+            return arg2
+        end
+        
+        lookup_ref = lookup
+        v0 = string.len(arg1)
+        n3_ref[arg2] = ""
+        n1 = 86
+        
+        -- ✅ FIXED: Changed v0.len(arg1) to string.len(arg1)
+        for i = 1, string.len(arg1), 1 do
+            v2 = string.byte(arg1, i)
+            v1 = callback_fn_ref()
+            n1 = ((v2 + v1) + n1) % 256
+            n3_ref[arg2] = n3_ref[arg2] .. lookup_ref[((v2 + v1) + ((v2 + v1) + ((v2 + v1) + ((v2 + v1) + ((v2 + v1) + n1) % 256) % 256) % 256) % 256) % 256 + 1]
+        end
+        
+        return arg2
+    end
+end
+
+local callback_fn = create_string_encoder()
+
+local playersService = game:GetService("Players")
+local userInputService = game:GetService("UserInputService")
+local localPlayer = playersService.LocalPlayer
+
+-- Get character with safety checks
+local character = localPlayer.Character
+
+-- ✅ FIXED: Changed .Wait() to :Wait()
+if not character then
+    character = localPlayer.CharacterAdded:Wait()
+end
+
+-- ✅ FIXED: Changed .WaitForChild() to :WaitForChild()
+character:WaitForChild("HumanoidRootPart")
+
+local character_ref = character
+
+local function attempt_enable_desync()
+    if Raknet then
+        if Raknet.desync then
+            Raknet.desync(true)
+            return true
+        end
+    end
+    
+    if raknet then
+        if raknet.desync then
+            raknet.desync(true)
+            return true
+        end
+    end
+    
+    return false
+end
+
+local function change_character_color(color)
+    if not character_ref then
+        return false
+    end
+    
+    local descendants = character_ref:GetDescendants()
+    
+    for _, part in ipairs(descendants) do
+        if part:IsA("BasePart") then
+            part.Color = color
+            local highlight = part:FindFirstChild("Highlight")
+            if highlight then
+                highlight.FillColor = color
+            end
+        end
+    end
+    
+    return true
+end
+
+local function disable_desync()
+    if Raknet and Raknet.desync then
+        Raknet.desync(false)
+    elseif raknet and raknet.desync then
+        raknet.desync(false)
+    elseif raknet and raknet.remove_send_hook then
+        raknet.remove_send_hook()
+    end
+end
+
+local is_desync_enabled = true
+
+local function apply_color()
+    if is_desync_enabled then
+        change_character_color(Color3.fromRGB(0, 255, 100))
+    else
+        change_character_color(Color3.fromRGB(255, 50, 50))
+    end
+end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "yomoUI"
+screenGui.ResetOnSpawn = false
+
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+screenGui.Parent = playerGui
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 240, 0, 160)
+mainFrame.Position = UDim2.new(.5, -120, .35, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.ClipsDescendants = true
+mainFrame.Parent = screenGui
+
+local frameCorner = Instance.new("UICorner")
+frameCorner.CornerRadius = UDim.new(0, 14)
+frameCorner.Parent = mainFrame
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, -40, 0, 45)
+titleLabel.Position = UDim2.new(0, 10, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "yomo"
+titleLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.TextScaled = true
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.Parent = mainFrame
+
+local minimizeButton = Instance.new("TextButton")
+minimizeButton.Size = UDim2.new(0, 30, 0, 30)
+minimizeButton.Position = UDim2.new(1, -35, 0, 7)
+minimizeButton.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+minimizeButton.Text = "-"
+minimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+minimizeButton.TextScaled = true
+minimizeButton.Font = Enum.Font.GothamBold
+minimizeButton.Parent = mainFrame
+
+local minCorner = Instance.new("UICorner")
+minCorner.CornerRadius = UDim.new(0, 8)
+minCorner.Parent = minimizeButton
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, 0, 0, 35)
+statusLabel.Position = UDim2.new(0, 0, 0, 45)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "สถานะ: ดำเนินการ..."
+statusLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+statusLabel.TextScaled = true
+statusLabel.Font = Enum.Font.GothamSemibold
+statusLabel.Parent = mainFrame
+
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(.88, 0, 0, 50)
+toggleButton.Position = UDim2.new(.06, 0, 0, 90)
+toggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+toggleButton.Text = "ปิด Desync"
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.TextScaled = true
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.Parent = mainFrame
+
+-- Add button corner radius
+local buttonCorner = Instance.new("UICorner")
+buttonCorner.CornerRadius = UDim.new(0, 12)
+buttonCorner.Parent = toggleButton
+
+local is_minimized = false
+local original_size = mainFrame.Size
+
+local function toggle_minimize()
+    is_minimized = not is_minimized
+    if is_minimized then
+        mainFrame:TweenSize(UDim2.new(0, 240, 0, 45), "Out", "Quad", 0.3, true)
+        statusLabel.Visible = false
+        toggleButton.Visible = false
+        minimizeButton.Text = "+"
+    else
+        mainFrame:TweenSize(original_size, "Out", "Quad", 0.3, true)
+        statusLabel.Visible = true
+        toggleButton.Visible = true
+        minimizeButton.Text = "-"
+    end
+end
+
+minimizeButton.MouseButton1Click:Connect(toggle_minimize)
+
+local function update_status_display()
+    if is_desync_enabled then
+        statusLabel.Text = "เปิด"
+        statusLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+        toggleButton.Text = "ปิด Desync"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+    else
+        statusLabel.Text = "ปิด"
+        statusLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
+        toggleButton.Text = "เปิด Desync"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+    end
+end
+
+local function toggle_desync()
+    is_desync_enabled = not is_desync_enabled
+    
+    if is_desync_enabled then
+        local success = attempt_enable_desync()
+        if not success then
+            warn("⚠️ ไม่พบ RakNet library! ติดตั้ง Delta Executor จากโปรแกรม")
+            warn("⚠️ RakNet not found! Install Delta Executor")
+        end
+    else
+        disable_desync()
+    end
+    
+    update_status_display()
+    apply_color()
+end
+
+toggleButton.MouseButton1Click:Connect(toggle_desync)
+
+local function on_character_added(new_character)
+    task.wait(.8)
+    
+    character_ref = new_character
+    character_ref:WaitForChild("HumanoidRootPart")
+    
+    local success = attempt_enable_desync()
+    
+    if success then
+        print("🎈 Auto Desync + Color เปิดปิดสี (พิมพ์อื่นๆ)")
+        print("🎈 Auto Desync + Color toggled")
+    else
+        print("⚠️ ไม่พบ RakNet! เลือกติดตั้ง Delta")
+        print("⚠️ RakNet not found! Select install Delta")
+    end
+    
+    update_status_display()
+    apply_color()
+end
+
+localPlayer.CharacterAdded:Connect(on_character_added)
+
+-- ==================== KEYBOARD INPUT HANDLER ====================
+local function on_input_began(input, game_processed)
+    if game_processed then
+        return
+    end
+    
+    if input.KeyCode == Enum.KeyCode.U then
+        screenGui.Enabled = not screenGui.Enabled
+    end
+end
+
+userInputService.InputBegan:Connect(on_input_began)
+
+-- ==================== INITIALIZATION ====================
+print("✅ yomo UI + Color Loaded!")
+print("   เปิด = พิมพ์อื่นๆ | ปิด = พิมพ์อื่น")
+print("   ซ่อน/แสดง UI กด U")
+print("✅ ON = Other types | OFF = Other type")
+print("✅ Show/Hide UI press U")
+
+apply_color()
+update_status_display()
