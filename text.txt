@@ -1,0 +1,439 @@
+-- ==========================================
+-- 1. WindUI Initialization (ตามรูปแบบของคุณ)
+-- ==========================================
+local WindUI
+do
+    local ok, result = pcall(function()
+        return require("./src/Init")
+    end)
+    if ok then
+        WindUI = result
+    else
+        WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/dist/main.lua"))()
+    end
+end
+
+local Window = WindUI:CreateWindow({
+    Title = "Auto Farm Hub",
+    Author = "mo XHUB",
+    Folder = "ftgshub",
+    Icon = "computer",
+    NewElements = true,
+    HideSearchBar = false,
+    OpenButton = {
+        Title = "mo XHUB",
+        CornerRadius = UDim.new(1,0),
+        StrokeThickness = 3,
+        Enabled = true,
+        Draggable = true,
+        OnlyMobile = false,
+        Color = ColorSequence.new(Color3.fromHex("#30FF6A"), Color3.fromHex("#e7ff2f"))
+    }
+})
+
+-- Global State Handler
+getgenv().G_Toggles = getgenv().G_Toggles or {}
+getgenv().G_Options = getgenv().G_Options or {}
+
+local function G_Toggle(Name)
+    return getgenv().G_Toggles[Name] or false
+end
+
+local function G_Option(Name)
+    return getgenv().G_Options[Name]
+end
+
+-- ==========================================
+-- 2. Movement Module
+-- ==========================================
+local Movement = {}
+
+function Movement.TP(Position)
+    return Utils.TP(Position)
+end
+
+function Movement.LerpTP(Position, Duration)
+    return Utils.LerpTP(Position, Duration)
+end
+
+function Movement.TeleportTo(Origin, Target, Speed, Conditional)
+    local SpeedMultiplier = G_Option("ATMFarmSpeedMultiplier") or 1
+    local FinalSpeed = Speed * SpeedMultiplier
+
+    if G_Toggle("ATMFarmUsePath") then
+        return SecureLerpTeleportWithPathfinding(Origin, Target, FinalSpeed, Conditional)
+    else
+        return SecureLerpTeleport(Origin, Target, FinalSpeed, Conditional)
+    end
+end
+
+function Movement.MoveAlongPath(StartPos, GoalPos, Speed, HoverOffset)
+    local Character = AssertCharacter()
+    local Path = PathLib.GetPath(StartPos, GoalPos)
+    local Offset = HoverOffset or Vector3.new(0, 3, 0)
+    local MoveSpeed = Speed or 60
+
+    if Path and #Path:GetWaypoints() > 0 then
+        for _, Waypoint: PathWaypoint in next, Path:GetWaypoints() do
+            SecureNet.Send(ArgumentChecks.Sprint.Value, true)
+            local Distance = (Waypoint.Position - Character:GetPivot().Position).Magnitude
+            local TravelTime = PathLib.GetTravelTime(Distance, MoveSpeed)
+            Utils.LerpTP(Waypoint.Position + Offset, TravelTime)
+        end
+    end
+end
+
+-- ==========================================
+-- 3. Position Module
+-- ==========================================
+local Position = {}
+
+Position.Locations = {
+    ShelfStockerCheckpoint = Vector3.new(159, 255, 226),
+    ShelfStockerJob = Vector3.new(159.348, 254.375, 203.81),
+    ShelfStockerLock = Vector3.new(149, 255, 209),
+}
+
+function Position.ExtractPosition(object: Instance): Vector3?
+    if not object then return nil end
+    if object:IsA("BasePart") then
+        return object.Position
+    elseif object:IsA("Model") then
+        local ok, cf = pcall(function() return object:GetPivot() end)
+        if ok and cf then return cf.Position end
+        if object.PrimaryPart then return object.PrimaryPart.Position end
+    end
+    return nil
+end
+
+function Position.GetDistance(pos1: Vector3, pos2: Vector3): number
+    return (pos1 - pos2).Magnitude
+end
+
+function Position.FindClosestShelf(beacon: Instance, shelvesFolder: Instance): BasePart?
+    if not beacon or not shelvesFolder then return nil end
+    local beaconPos = Position.ExtractPosition(beacon)
+    if not beaconPos then return nil end
+
+    local closestShelf = nil
+    local closestDist = math.huge
+
+    for _, child in next, shelvesFolder:GetChildren() do
+        if child:IsA("BasePart") and child.Name == "Shelf" then
+            local dist = Position.GetDistance(child.Position, beaconPos)
+            if dist < closestDist then
+                closestDist = dist
+                closestShelf = child
+            end
+        end
+    end
+
+    return closestShelf
+end
+
+-- ==========================================
+-- 4. Shelf Stocker Module
+-- ==========================================
+local ShelfStocker = {}
+
+function ShelfStocker.GetStockingTime()
+    local JobData = SafeRequire(GameModules.Jobs.JobData :: ModuleScript)
+    local SkillsList = SafeRequire(GameModules.Skills.SkillsList :: ModuleScript)
+
+    local BaseStockTime = JobData.job_info.shelf_stocker.stock_shelf_length
+    local ShelfStockerSkills = SkillsList.list.shelf_stocker
+    local SpeedPercentageIncrease = 0
+
+    for _, SkillInfo in next, ShelfStockerSkills do
+        local HasSkill = secure_call(SkillsList.has_skill, Data_Module, "shelf_stocker", SkillInfo.name)
+        local RewardInfo = SkillInfo.reward_info
+
+        if HasSkill and RewardInfo and RewardInfo.speed_percentage_increase then
+            SpeedPercentageIncrease = SpeedPercentageIncrease + RewardInfo.speed_percentage_increase
+        end
+    end
+
+    local SpeedMultiplier = 1 + (SpeedPercentageIncrease / 100)
+    return BaseStockTime / SpeedMultiplier
+end
+
+function ShelfStocker.AutoDeposit()
+    if not G_Toggle("ShelfStockerAutoDeposit") then return end
+
+    local DepositThreshold = G_Option("ShelfStockerDepositThreshold") or 1000
+    local Cash = Inventory.GetMoneyT().Cash
+
+    if Cash >= DepositThreshold then
+        local ATM = Map.Tiles.GasStationTile.Quick11.Interior.ATM
+        local ATMObject = nil
+
+        for _, Object in next, ATM_Module.class.objects do
+            if Object.instance == ATM then
+                ATMObject = Object
+                break
+            end
+        end
+
+        assert(ATMObject, "Could not find ATM object!")
+
+        local Disabled = secure_call(ATMObject.states.disabled.get)
+        local Hacker = secure_call(ATMObject.states.hacker.get)
+
+        if not Disabled and not Hacker then
+            local Character = AssertCharacter()
+            local Origin = Character:GetPivot()
+            local TargetPos = Position.ExtractPosition(ATM.Area) or ATM.Area:GetPivot().Position
+
+            Movement.MoveAlongPath(Origin.Position, TargetPos, 26, Vector3.new(0, 3, 0))
+
+            SecureNet.Get(ArgumentChecks.ATM_Transfer.Value, "hand", "bank", Cash)
+            WaitForPing()
+
+            Movement.MoveAlongPath(TargetPos, Origin.Position, 26, Vector3.new(0, 3, 0))
+            Movement.TP(Origin)
+            WaitForPing()
+        end
+    end
+end
+
+function ShelfStocker.CreateRoutine()
+    return coroutine_create(LPH_JIT_MAX(function()
+        local RoutineRunning = false
+        local RoutineStart = 0
+        local CurrentThread = nil
+
+        while task_wait() do
+            if not G_Toggle("ShelfStocking") then
+                if CurrentThread then
+                    task.cancel(CurrentThread)
+                    CurrentThread = nil
+                    RoutineRunning = false
+                end
+                continue
+            end
+
+            if RoutineRunning then
+                if os.clock() - RoutineStart > 45 then
+                    warn("ShelfStockRoutine: Timed out.")
+                    if CurrentThread then
+                        task.cancel(CurrentThread)
+                        CurrentThread = nil
+                    end
+                    RoutineRunning = false
+                end
+                continue
+            end
+
+            if CurrentThread then
+                task.cancel(CurrentThread)
+                CurrentThread = nil
+            end
+
+            CurrentThread = task_spawn(function()
+                local Success, Error = pcall(function()
+                    RoutineRunning = true
+                    RoutineStart = os.clock()
+
+                    assert(
+                        ArgumentChecks.Player_Stocked_Shelf.Found and ArgumentChecks.Player_Started_Stocking_Shelf.Found,
+                        "Unable to find arguments for stocking!"
+                    )
+
+                    local Beacon = workspace:WaitForChild("Map"):WaitForChild("Tiles"):WaitForChild("GasStationTile"):WaitForChild("Quick11"):WaitForChild("Interior"):WaitForChild("Quick11Beacon")
+                    local Shelves = workspace:WaitForChild("Map"):WaitForChild("Tiles"):WaitForChild("GasStationTile"):WaitForChild("Quick11"):WaitForChild("Interior"):WaitForChild("ShelfStockingJob"):WaitForChild("Shelves")
+                    local DoorBase = workspace:WaitForChild("Map"):WaitForChild("Tiles"):WaitForChild("GasStationTile"):WaitForChild("Quick11"):WaitForChild("Interior"):WaitForChild("DoorSystem"):WaitForChild("DoorBase")
+
+                    DoorBase.CanCollide = false
+                    DoorBase.CanQuery = false
+
+                    local Shelf = Position.FindClosestShelf(Beacon, Shelves)
+                    if not Shelf then
+                        warn("ShelfStockRoutine: Could not find a shelf to stock!")
+                        return
+                    end
+
+                    local Character = AssertCharacter()
+
+                    if LocalPlayer:GetAttribute("Job") ~= "shelf_stocker" then
+                        SafeNotify(T("ShelfStockRoutine: Teleporting to Shelf Stocker job..."), 3)
+                        Movement.TeleportTo(Character:GetPivot(), CFrame.new(Position.Locations.ShelfStockerCheckpoint), TELEPORT_SPEED)
+                        Movement.LerpTP(Position.Locations.ShelfStockerJob, 3)
+                        SecureNet.Send(ArgumentChecks.Apply_For_Job.Value, Beacon)
+                    end
+
+                    ShelfStocker.AutoDeposit()
+
+                    local HeldTool = secure_call(Char.held_tool.get)
+                    if not HeldTool or not HeldTool:IsA("Tool") or HeldTool.Name:match("Box") then
+                        local BoxPromptPart = workspace:WaitForChild("Map"):WaitForChild("Tiles"):WaitForChild("GasStationTile"):WaitForChild("Quick11"):WaitForChild("Interior"):WaitForChild("ShelfStockingJob"):WaitForChild("NormalBox")
+                        local BoxPrompt = BoxPromptPart:FindFirstChildOfClass("ProximityPrompt")
+
+                        if not BoxPrompt then
+                            warn("ShelfStockRoutine: Could not find Box ProximityPrompt!")
+                            return
+                        end
+
+                        SecureNet.Send(ArgumentChecks.Sprint.Value, true)
+                        local Origin = Character:GetPivot()
+                        local Lock = Utils.LockPosition(Position.Locations.ShelfStockerLock)
+
+                        WaitForPing()
+
+                        for i = 5, 1, -1 do
+                            fireproximityprompt(BoxPrompt)
+                            task_wait()
+                        end
+
+                        Lock:Disconnect()
+                        Movement.TP(Origin + Vector3.new(0, 0.1, 0))
+
+                        local StartTime = os.clock()
+                        local HasBox = false
+
+                        repeat
+                            task_wait(0.1)
+                            HeldTool = secure_call(Char.held_tool.get)
+                            if HeldTool and HeldTool:IsA("Tool") and HeldTool.Name:match("Box") then
+                                HasBox = true
+                                break
+                            end
+
+                            for _, Tool in next, LocalPlayer.Backpack:GetChildren() do
+                                if Tool:IsA("Tool") and Tool.Name:match("Box") then
+                                    HasBox = true
+                                    break
+                                end
+                            end
+                        until HasBox or os.clock() - StartTime > 5
+
+                        if not HasBox then
+                            warn("ShelfStockRoutine: Failed to get box.")
+                            return
+                        end
+
+                        local ShelfPosition = Position.ExtractPosition(Shelf)
+                        SecureNet.Send(ArgumentChecks.Sprint.Value, true)
+
+                        if ShelfPosition and Position.GetDistance(ShelfPosition, Character:GetPivot().Position) > 5 then
+                            Movement.LerpTP(ShelfPosition + Vector3.new(0, 3, 0), 2)
+                        else
+                            WaitForPing()
+                        end
+
+                        if not secure_call(Char.held_tool.get) then
+                            for _, Tool in next, LocalPlayer.Backpack:GetChildren() do
+                                if Tool:IsA("Tool") and Tool.Name:match("Box") then
+                                    Character.Humanoid:EquipTool(Tool)
+                                    break
+                                end
+                            end
+                        end
+
+                        local BoxCount = 0
+                        if secure_call(Char.held_tool.get) then
+                            for _, Attribute in next, secure_call(Char.held_tool.get):GetAttributes() do
+                                if typeof(Attribute) == "string" and Attribute:match("Box") then
+                                    BoxCount = BoxCount + 1
+                                end
+                            end
+
+                            for i = 1, BoxCount do
+                                SecureNet.Send(ArgumentChecks.Player_Started_Stocking_Shelf.Value, Shelf)
+                                local StockingTime = ShelfStocker.GetStockingTime()
+
+                                SafeNotify(
+                                    string.format("Stocking shelf for %.2f seconds (%d/%d)", StockingTime, i, BoxCount),
+                                    StockingTime
+                                )
+
+                                task_wait(StockingTime + 0.05)
+                                SecureNet.Send(ArgumentChecks.Player_Stocked_Shelf.Value, Shelf)
+                            end
+
+                            task.delay(0.1, function()
+                                for _, v in next, workspace:GetChildren() do
+                                    if v.Name == "Beacon" then
+                                        v:Destroy()
+                                    end
+                                end
+                            end)
+                        end
+                    end
+                end)
+
+                if not Success then
+                    warn("ShelfStockRoutine Error: ", Error)
+                    task_wait(2)
+                end
+                RoutineRunning = false
+            end)
+        end
+    end))
+end
+
+-- ==========================================
+-- 5. WindUI Layout & Elements
+-- ==========================================
+local FarmTab = Window:Tab({ Title = "Auto Farm", Icon = "box" })
+local SettingsTab = Window:Tab({ Title = "Settings", Icon = "settings" })
+
+local ShelfThread = nil
+
+-- --- Auto Farm Tab ---
+FarmTab:Section({ Title = "Shelf Stocker Options" })
+
+FarmTab:Toggle({
+    Title = "Enable Shelf Stocker",
+    Desc = "อัตโนมัติรับกล่องและเติมสินค้าใส่ชั้นวาง",
+    Default = false,
+    Callback = function(Value)
+        getgenv().G_Toggles["ShelfStocking"] = Value
+        if Value then
+            if not ShelfThread or coroutine.status(ShelfThread) == "dead" then
+                ShelfThread = ShelfStocker.CreateRoutine()
+                coroutine.resume(ShelfThread)
+            end
+        end
+    end
+})
+
+FarmTab:Toggle({
+    Title = "Auto Deposit Cash",
+    Desc = "ฝากเงินเข้า ATM อัตโนมัติเมื่อถึงจำนวนที่กำหนด",
+    Default = false,
+    Callback = function(Value)
+        getgenv().G_Toggles["ShelfStockerAutoDeposit"] = Value
+    end
+})
+
+FarmTab:Slider({
+    Title = "Deposit Threshold",
+    Desc = "จำนวนเงินสดขั้นต่ำก่อนจะไปฝาก ATM",
+    Step = 100,
+    Value = {Min = 500, Max = 10000, Default = 1000},
+    Callback = function(Value)
+        getgenv().G_Options["ShelfStockerDepositThreshold"] = Value
+    end
+})
+
+-- --- Settings Tab ---
+SettingsTab:Section({ Title = "Movement Settings" })
+
+SettingsTab:Toggle({
+    Title = "Use Pathfinding",
+    Desc = "เปิดใช้งานการเดินหลบสิ่งกีดขวางแบบ Pathfinding",
+    Default = false,
+    Callback = function(Value)
+        getgenv().G_Toggles["ATMFarmUsePath"] = Value
+    end
+})
+
+SettingsTab:Slider({
+    Title = "Speed Multiplier",
+    Desc = "ตัวคูณความเร็วการเคลื่อนที่/วาร์ป",
+    Step = 0.1,
+    Value = {Min = 1, Max = 5, Default = 1},
+    Callback = function(Value)
+        getgenv().G_Options["ATMFarmSpeedMultiplier"] = Value
+    end
+})
