@@ -312,7 +312,7 @@ local Options = Library.Options
 local Toggles = Library.Toggles
 
 local Window = Library:CreateWindow({
-	Title = "Wallhack.gg",
+	Title = "yomo lo",
 	Footer = "Project Delta",
 	Size = UDim2.fromOffset(560, 480),
 	NotifySide = "Right",
