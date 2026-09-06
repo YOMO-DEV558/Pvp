@@ -1418,11 +1418,15 @@ function StateController:StartJob()
     end
 end
 func = {}
+local atmRunId = 0
 func['AutoFarmATM'] = function()
+    atmRunId = atmRunId + 1
+    local myRunId = atmRunId
     local playerLevel = Sf:GetLevel()
     if playerLevel < 10 then return end
     local retryCount = 0
     while task.wait(0) do
+        if myRunId ~= atmRunId then break end
         if not c().AutoFarmATM then
             Sf:ForceStop()
             break
@@ -1434,10 +1438,13 @@ func['AutoFarmATM'] = function()
             continue
         end
         local existingVehicle = nil
-        for _, vehicle in pairs(workspace.Vehicles:GetChildren()) do
-            if vehicle:GetAttribute('OwnerUserId') == UserId then
-                existingVehicle = vehicle
-                break
+        local vehiclesFolder = workspace:FindFirstChild('Vehicles')
+        if vehiclesFolder then
+            for _, vehicle in pairs(vehiclesFolder:GetChildren()) do
+                if vehicle:GetAttribute('OwnerUserId') == UserId and Sf:IsVehicleType(vehicle, c().VechineType) then
+                    existingVehicle = vehicle
+                    break
+                end
             end
         end
         if not existingVehicle then
@@ -1456,12 +1463,13 @@ func['AutoFarmATM'] = function()
             retryCount = 0
         end
         local foundVehicle = false
-        for _, vehicle in pairs(workspace.Vehicles:GetChildren()) do
+        local vehiclesFolder2 = workspace:FindFirstChild('Vehicles')
+        for _, vehicle in pairs(vehiclesFolder2 and vehiclesFolder2:GetChildren() or {}) do
             if not c().AutoFarmATM then
                 foundVehicle = true
                 break
             end
-            if vehicle:GetAttribute('OwnerUserId') == UserId then
+            if vehicle:GetAttribute('OwnerUserId') == UserId and Sf:IsVehicleType(vehicle, c().VechineType) then
                 Sf:Ac("lock_vehicle", vehicle, true)
                 foundVehicle = true
                 retryCount = 0
@@ -1556,7 +1564,11 @@ func['AutoFarmATM'] = function()
                                     if shopZone then
                                         shopPos = shopZone:IsA("BasePart") and shopZone.Position or shopZone:GetPivot().Position
                                     else
-                                        local spinClub = workspace.Map.SpinClub.Exterior:GetChildren()[8]
+                                        local spinClub
+                                        local map = workspace:FindFirstChild('Map')
+                                        local spin = map and map:FindFirstChild('SpinClub')
+                                        local exterior = spin and spin:FindFirstChild('Exterior')
+                                        if exterior then spinClub = exterior:GetChildren()[8] end
                                         if spinClub then
                                             shopPos = spinClub:IsA("BasePart") and spinClub.Position or spinClub:GetPivot().Position
                                         else
@@ -1725,9 +1737,12 @@ func['AutoFarmATM'] = function()
             break
         end
     end
-    Sf:ForceStop()
+    if myRunId == atmRunId then
+        Sf:ForceStop()
+    end
 end
 local fishingTask = nil
+local fishingRunId = 0
 local function GetBestFishingItem(list, requested)
     if requested and requested ~= "Smart Select" then
         return requested
@@ -1744,7 +1759,9 @@ local function GetBestFishingItem(list, requested)
     return best or list[#list].Name
 end
 func['AutoFarmFishing'] = function()
-    while Config.AutoFarmFishing do
+    fishingRunId = fishingRunId + 1
+    local myRunId = fishingRunId
+    while Config.AutoFarmFishing and myRunId == fishingRunId do
         local selectedRodName = GetBestFishingItem(FishingRods, Config.FishingRod)
         local selectedBaitName = GetBestFishingItem(FishingBaits, Config.FishingWormtec)
         local hasRod, rodUid, actualRodName, rodEquipped = false, nil, nil, false
@@ -2011,8 +2028,9 @@ func['AutoFarmFishing'] = function()
                         end
                     end
                     for _, fUid in ipairs(fishesToSell) do
-                        Net.get("sell_item", tostring(fUid), 1)
-                        task.wait(0.01)
+                        if not Config.AutoFarmFishing or myRunId ~= fishingRunId then break end
+                        pcall(function() Net.get("sell_item", tostring(fUid), 1) end)
+                        task.wait(0.03)
                     end
                     task.wait(0.3)
                 end
@@ -2052,17 +2070,19 @@ func['AutoFarmFishing'] = function()
             for i = 1, Config.FishingBaitAmount do
                 local hardwareShop = workspace:FindFirstChild("ShopZone_Hardware")
                 if hardwareShop then
-                    Net.get("purchase_consumable", hardwareShop, targetBait2)
+                    pcall(function() Net.get("purchase_consumable", hardwareShop, targetBait2) end)
                 end
-                task.wait(0.05)
+                task.wait(0.08)
             end
             task.wait(0.5)
         else
             task.wait(0.5)
         end
     end
-    Sf:ForceStop()
-    ClearPathLines()
+    if myRunId == fishingRunId then
+        Sf:ForceStop()
+        ClearPathLines()
+    end
 end
 func['StartFarmJob'] = function()
     while task.wait(0.2) do
@@ -2560,6 +2580,7 @@ FarmTab:Toggle({
         if Value then
             task.spawn(func["AutoFarmATM"])
         else
+            atmRunId = atmRunId + 1
             Sf:ForceStop()
             ClearPathLines()
         end
@@ -3282,6 +3303,7 @@ FishingTab:Toggle({
         if Value then
             task.spawn(func["AutoFarmFishing"])
         else
+            fishingRunId = fishingRunId + 1
             Sf:ForceStop()
             ClearPathLines()
         end
