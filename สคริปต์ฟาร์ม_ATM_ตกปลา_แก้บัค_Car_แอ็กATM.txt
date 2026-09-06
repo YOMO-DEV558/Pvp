@@ -4,7 +4,7 @@
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
 local Window = WindUI:CreateWindow({
-    Title = "🎣 Fishing",
+    Title = "🎣 Fishing Farm",
     Icon = "fish",
     Author = "WindUI",
     Folder = "FishingFarm",
@@ -134,6 +134,56 @@ function Sf:IsVehicleType(vehicle, desiredType)
         return n:find("bike", 1, true) ~= nil or n:find("bmx", 1, true) ~= nil
     end
     return n:find("car", 1, true) ~= nil
+end
+
+local BIKE_CRATE_COST = 870
+function Sf:BuyBikeCrate()
+    local map = workspace:FindFirstChild("Map")
+    local tiles = map and map:FindFirstChild("Tiles")
+    local burgerTile = tiles and tiles:FindFirstChild("BurgerPlaceTile")
+    local cycles = burgerTile and burgerTile:FindFirstChild("UrbanCyclesAndSkates")
+    local interior = cycles and cycles:FindFirstChild("Interior")
+    local crates = interior and interior:FindFirstChild("Crates")
+    local bikeCrate = crates and crates:FindFirstChild("Bike Crate")
+    local beacon = bikeCrate and bikeCrate:FindFirstChild("Beacon")
+    local touchPart = beacon and beacon:FindFirstChild("TouchPart")
+    if not bikeCrate or not touchPart then
+        return false
+    end
+
+    local money = tonumber(self:GetMoney()) or 0
+    if money < BIKE_CRATE_COST then
+        local bank = tonumber(self:ATMMoney()) or 0
+        local need = BIKE_CRATE_COST - money
+        if bank < need then
+            return false
+        end
+        pcall(function()
+            Net.get("transfer_funds", "bank", "hand", need)
+        end)
+        task.wait(0.4)
+    end
+
+    if (tonumber(self:GetMoney()) or 0) < BIKE_CRATE_COST then
+        return false
+    end
+
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    local getRemote = remotes and remotes:FindFirstChild("Get")
+    local options = bikeCrate:FindFirstChild("CrateOptions")
+    local basic = options and options:FindFirstChild("Basic")
+    if not getRemote or not basic then
+        return false
+    end
+
+    -- เปิดกล่อง BMX/Bike ตามระบบเดิมของเกม
+    local ok = pcall(function()
+        getRemote:InvokeServer(658, "open_crate", basic, "money")
+    end)
+    if ok then
+        task.wait(0.8)
+    end
+    return ok
 end
 
 function Sf:GetCarFromType(types)
@@ -367,20 +417,35 @@ local function getFishingVehicle()
     return nil
 end
 
+local vehicleNotifyAt = 0
 local function ensureFishingVehicle(runId)
     local vehicle = getFishingVehicle()
     if vehicle then return vehicle end
     if not isRunning(runId) then return nil end
 
-    -- พยายามเรียกรถที่มีอยู่ก่อน
     pcall(function() Sf:PullVehicle() end)
     task.wait(0.35)
     vehicle = getFishingVehicle()
     if vehicle then return vehicle end
 
-    -- ระบบนี้บังคับใช้รถที่มีอยู่แล้ว: ถ้าไม่มีรถจะไม่เริ่มวิ่ง/ไม่เทเลพอร์ตตัวละคร
-    -- เพื่อไม่ให้ลูปค้างหรือเกิดการวาร์ปผิดตำแหน่ง
-    return getFishingVehicle()
+    -- ถ้าเลือก Bike และไม่มีรถในโลก ให้ซื้อ Bike Crate ตามระบบเดิม
+    if Config.FishingVehicleType == "Bike" then
+        local ok = false
+        pcall(function() ok = Sf:BuyBikeCrate() end)
+        if ok then
+            task.wait(1.0)
+            pcall(function() Sf:PullVehicle() end)
+            task.wait(0.4)
+            vehicle = getFishingVehicle()
+            if vehicle then return vehicle end
+        end
+    end
+
+    if os.clock() - vehicleNotifyAt > 5 then
+        vehicleNotifyAt = os.clock()
+        WindNotify("🚗 Fishing Farm", "ยังไม่พบรถ " .. tostring(Config.FishingVehicleType) .. " — กำลังลองเรียกรถ/ซื้อรถ")
+    end
+    return nil
 end
 
 local function sitInFishingVehicle(vehicle, runId)
@@ -643,15 +708,10 @@ local function doFishingCycle(rodItem, baitItem, runId)
     local rodTool = getRodTool(rodItem)
     if not rodTool or not rodTool:IsA("Tool") then return false end
 
+    -- เกมนี้ใช้ UID ของ item inventory ไม่ใช่ชื่อ item
     local okAmmo = pcall(function()
-        Net.get("equip_ammo_on_item", rodItem.Name, baitItem.Name)
+        Net.get("equip_ammo_on_item", tostring(rodItem.Name), tostring(baitItem.Name))
     end)
-    if not okAmmo then
-        -- รองรับระบบที่ใช้ UID ของ inventory item
-        okAmmo = pcall(function()
-            Net.get("equip_ammo_on_item", tostring(rodItem.Name), tostring(baitItem.Name))
-        end)
-    end
     if not okAmmo then return false end
     task.wait(0.12)
 
@@ -780,9 +840,13 @@ func["AutoFarmFishing"] = function()
         rodItem = findInventoryItem(rodName)
         baitItem = findInventoryItem(baitName)
         if rodItem and baitItem then
-            doFishingCycle(rodItem, baitItem, runId)
+            local ok = doFishingCycle(rodItem, baitItem, runId)
+            if not ok then
+                task.wait(0.5)
+            end
         else
-            task.wait(0.25)
+            WindNotify("🎣 Fishing Farm", "ไม่พบคันเบ็ด/เหยื่อที่เลือก — กำลังตรวจสอบใหม่")
+            task.wait(0.5)
         end
 
         -- เต็มแล้วขายทันที
