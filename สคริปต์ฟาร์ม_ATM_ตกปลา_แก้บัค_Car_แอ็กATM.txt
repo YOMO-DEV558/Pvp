@@ -1,4 +1,46 @@
 -- Fishing Farm - fixed version
+-- WindUI bootstrap
+-- Official WindUI release loader is used by the original project.
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+
+local Window = WindUI:CreateWindow({
+    Title = "🎣 Fishing Farm",
+    Icon = "fish",
+    Author = "WindUI",
+    Folder = "FishingFarm",
+    Size = UDim2.fromOffset(580, 460),
+    MinSize = Vector2.new(540, 360),
+    MaxSize = Vector2.new(820, 620),
+    Transparent = true,
+    Theme = "Dark",
+    Resizable = true,
+    SideBarWidth = 190,
+    HideSearchBar = false,
+    ScrollBarEnabled = true,
+    OpenButton = {
+        Enabled = true,
+        Draggable = true,
+        Title = "Open Fishing Farm",
+        OnlyMobile = false,
+    },
+    User = {
+        Enabled = true,
+        Anonymous = false,
+        Name = game:GetService("Players").LocalPlayer.Name,
+        Image = "rbxthumb://type=AvatarHeadShot&id=" .. game:GetService("Players").LocalPlayer.UserId .. "&w=150&h=150",
+    },
+})
+
+local function WindNotify(title, content)
+    pcall(function()
+        WindUI:Notify({
+            Title = title,
+            Content = content,
+            Duration = 3,
+        })
+    end)
+end
+
 -- ใช้กับโครงสร้างเดิมที่มี Window / Config / Sf / Net / func อยู่แล้ว
 -- จุดสำคัญ: ฟาร์มตกปลาบังคับใช้รถ และทุกการเดินทางของฟาร์มใช้เส้นทางใต้ดินเสมอ
 
@@ -644,9 +686,11 @@ FishingTab:Toggle({
     Callback = function(value)
         Config.AutoFarmFishing = value
         if value then
+            WindNotify("🎣 Fishing Farm", "เริ่มฟาร์มตกปลา | Underground + Vehicle ON")
             task.spawn(func["AutoFarmFishing"])
         else
             fishingRunId += 1
+            WindNotify("🎣 Fishing Farm", "หยุดฟาร์มตกปลา")
             pcall(function() Sf:ForceStop() end)
         end
     end,
@@ -762,7 +806,8 @@ FishingTab:Toggle({
 })
 
 FishingTab:Section({
-    Title = "🕳️ Status: Underground = ON | Vehicle Required = ON",
+    Title = "🕳️ Underground = ON | 🚗 Vehicle = REQUIRED",
+    Desc = "ระบบฟาร์มตกปลาจะเดินทางใต้ดินและใช้รถเท่านั้น",
     Icon = "shield",
 })
 
