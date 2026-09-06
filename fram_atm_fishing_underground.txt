@@ -877,29 +877,74 @@ function Sf:MoveUnderground(destination, value, speed)
     if not hrp or not hum or hum.Health <= 0 then return false end
 
     local start = hrp.Position
-    local targetY = destination.Y - math.abs(Config.UndergroundDepth or 12)
-    local target = Vector3.new(destination.X, targetY, destination.Z)
-    local delta = target - start
-    local horizontal = Vector3.new(delta.X, 0, delta.Z)
-    local distance = horizontal.Magnitude
+    local depth = math.abs(Config.UndergroundDepth or 12)
+    local targetY = destination.Y - depth
+    local groundY = start.Y
+    local rayParams = RaycastParams.new()
+    rayParams.FilterDescendantsInstances = {char}
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    local ray = workspace:Raycast(start + Vector3.new(0, 2, 0), Vector3.new(0, -500, 0), rayParams)
+    if ray then groundY = ray.Position.Y end
+    local startY = groundY - depth
+    if start.Y <= startY then startY = start.Y end
+
     local moveSpeed = math.max(1, speed or Config.WalkingSpeed or 35)
-    if distance < 0.05 then
-        hrp:PivotTo(CFrame.new(target))
-        return true
-    end
+    local undergroundStart = Vector3.new(start.X, startY, start.Z)
+    local horizontal = Vector3.new(destination.X - start.X, 0, destination.Z - start.Z)
+    local distance = horizontal.Magnitude
 
     c().Running = true
     c().StopWalking = false
-    local moved = 0
-    while moved < distance and value and not c().StopWalking and hum.Health > 0 do
-        local dt = RunService.Heartbeat:Wait()
-        moved = math.min(distance, moved + moveSpeed * math.max(dt, 1/240))
-        local pos = start + horizontal.Unit * moved
-        hrp:PivotTo(CFrame.new(pos.X, targetY, pos.Z))
+
+    -- ลงใต้ดินก่อน
+    local downDistance = math.abs(start.Y - startY)
+    if downDistance > 0.05 then
+        local elapsed = 0
+        local duration = math.max(0.05, downDistance / moveSpeed)
+        while elapsed < duration and value and not c().StopWalking and hum.Health > 0 do
+            local dt = RunService.Heartbeat:Wait()
+            elapsed += math.max(dt, 1/240)
+            local alpha = math.min(1, elapsed / duration)
+            hrp:PivotTo(CFrame.new(start.X, start.Y + (startY - start.Y) * alpha, start.Z))
+        end
     end
 
+    if not value or c().StopWalking or hum.Health <= 0 then
+        c().Running = false
+        return false
+    end
+
+    -- เคลื่อนที่ใต้ดินไปหาเป้าหมาย
+    if distance > 0.05 then
+        local moved = 0
+        while moved < distance and value and not c().StopWalking and hum.Health > 0 do
+            local dt = RunService.Heartbeat:Wait()
+            moved = math.min(distance, moved + moveSpeed * math.max(dt, 1/240))
+            local alpha = moved / distance
+            local pos = undergroundStart + horizontal.Unit * moved
+            local y = startY + (targetY - startY) * alpha
+            hrp:PivotTo(CFrame.new(pos.X, y, pos.Z))
+        end
+    end
+
+    -- ถึงพิกัดเป้าหมายแล้วค่อยโผล่ขึ้นมาบนพื้น
     if value and not c().StopWalking and hum.Health > 0 then
-        hrp:PivotTo(CFrame.new(destination.X, targetY, destination.Z))
+        local undergroundPos = Vector3.new(destination.X, targetY, destination.Z)
+        local riseDistance = math.abs(destination.Y - targetY)
+        if riseDistance > 0.05 then
+            local elapsed = 0
+            local duration = math.max(0.05, riseDistance / moveSpeed)
+            while elapsed < duration and value and not c().StopWalking and hum.Health > 0 do
+                local dt = RunService.Heartbeat:Wait()
+                elapsed += math.max(dt, 1/240)
+                local alpha = math.min(1, elapsed / duration)
+                local y = targetY + (destination.Y - targetY) * alpha
+                hrp:PivotTo(CFrame.new(destination.X, y, destination.Z))
+            end
+        end
+        if value and not c().StopWalking and hum.Health > 0 then
+            hrp:PivotTo(CFrame.new(destination.X, destination.Y, destination.Z))
+        end
     end
     c().Running = false
     return value and not c().StopWalking and hum.Health > 0
@@ -1532,7 +1577,14 @@ func['AutoFarmATM'] = function()
                                 if #c().keys >= 3 and not closestATM:GetAttribute(c().keys[3]) then
                                     local atmPos = closestATM.Area.Position
                                     local dist = Sf:dist(closestATM.Area)
-                                    if dist > 15 then
+                                    if Config.UndergroundMovement and c().AutoFarmATM then
+                                        if Humanoid.Sit then
+                                            Sf:ExitVehicle(4)
+                                            task.wait(0.2)
+                                        end
+                                        FarmTeleport(atmPos, c().AutoFarmATM, Config.WalkingSpeed)
+                                        dist = Sf:dist(closestATM.Area)
+                                    elseif dist > 15 then
                                         local driveThread = task.spawn(function()
                                             Sf:Drive(vehicle, atmPos, c().AutoFarmATM, closestATM, c().ATMCarStopDist)
                                         end)
@@ -1730,7 +1782,13 @@ func['AutoFarmFishing'] = function()
                 task.wait(0.2)
             end
         end
-        if Humanoid.Sit then
+        if Config.UndergroundMovement and Config.AutoFarmFishing then
+            if Humanoid.Sit then
+                Sf:ExitVehicle(4)
+                task.wait(0.15)
+            end
+            FarmTeleport(fishingSpot, Config.AutoFarmFishing, Config.WalkingSpeed)
+        elseif Humanoid.Sit then
             Sf:Drive(vehicle, fishingSpot, Config.AutoFarmFishing, nil, 5, function()
                 Sf:ExitVehicle(4)
                 task.wait(0.15)
@@ -1738,9 +1796,6 @@ func['AutoFarmFishing'] = function()
                 if hrp then hrp.CFrame = hrp.CFrame * CFrame.new(0, 0, -3) end
             end)
             task.wait(0.3)
-        end
-        if Config.UndergroundMovement and Config.AutoFarmFishing then
-            FarmTeleport(fishingSpot, Config.AutoFarmFishing, Config.WalkingSpeed)
         end
         if hasRod and hasBait and rodUid and baitUid then
             if not rodEquipped then
