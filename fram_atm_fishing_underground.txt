@@ -889,14 +889,35 @@ function Sf:MoveUnderground(destination, value, speed)
     if start.Y <= startY then startY = start.Y end
 
     local moveSpeed = math.max(1, speed or Config.WalkingSpeed or 35)
-    local undergroundStart = Vector3.new(start.X, startY, start.Z)
     local horizontal = Vector3.new(destination.X - start.X, 0, destination.Z - start.Z)
     local distance = horizontal.Magnitude
 
     c().Running = true
     c().StopWalking = false
 
-    -- ลงใต้ดินก่อน
+    local function moveRoot(pos)
+        if hum.Sit then
+            local vehicle = nil
+            for _, v in pairs(workspace.Vehicles:GetChildren()) do
+                if v:GetAttribute('OwnerUserId') == UserId and v.PrimaryPart then
+                    vehicle = v
+                    break
+                end
+            end
+            if vehicle then
+                local offset = vehicle:GetPivot():ToObjectSpace(hrp.CFrame)
+                vehicle:PivotTo(CFrame.new(pos) * CFrame.Angles(0, select(2, vehicle:GetPivot():ToOrientation()), 0))
+                local pp = vehicle.PrimaryPart
+                if pp then
+                    hrp.CFrame = pp.CFrame * offset
+                end
+                return
+            end
+        end
+        hrp:PivotTo(CFrame.new(pos))
+    end
+
+    -- ลงใต้ดินก่อน โดยยังนั่งอยู่บนยานพาหนะ
     local downDistance = math.abs(start.Y - startY)
     if downDistance > 0.05 then
         local elapsed = 0
@@ -905,7 +926,7 @@ function Sf:MoveUnderground(destination, value, speed)
             local dt = RunService.Heartbeat:Wait()
             elapsed += math.max(dt, 1/240)
             local alpha = math.min(1, elapsed / duration)
-            hrp:PivotTo(CFrame.new(start.X, start.Y + (startY - start.Y) * alpha, start.Z))
+            moveRoot(Vector3.new(start.X, start.Y + (startY - start.Y) * alpha, start.Z))
         end
     end
 
@@ -914,454 +935,84 @@ function Sf:MoveUnderground(destination, value, speed)
         return false
     end
 
-    -- เคลื่อนที่ใต้ดินไปหาเป้าหมาย
+    -- เคลื่อนที่ใต้ดินไปหาเป้าหมาย โดยยังอยู่บนยานพาหนะ
     if distance > 0.05 then
         local moved = 0
         while moved < distance and value and not c().StopWalking and hum.Health > 0 do
             local dt = RunService.Heartbeat:Wait()
             moved = math.min(distance, moved + moveSpeed * math.max(dt, 1/240))
             local alpha = moved / distance
-            local pos = undergroundStart + horizontal.Unit * moved
+            local pos = start + horizontal.Unit * moved
             local y = startY + (targetY - startY) * alpha
-            hrp:PivotTo(CFrame.new(pos.X, y, pos.Z))
+            moveRoot(Vector3.new(pos.X, y, pos.Z))
         end
     end
 
-    -- ถึงพิกัดเป้าหมายแล้วค่อยโผล่ขึ้นมาบนพื้น
+    -- ถึงเป้าหมายแล้วค่อยขึ้นมาบนพื้น และยังนั่งอยู่บนรถ
     if value and not c().StopWalking and hum.Health > 0 then
-        local undergroundPos = Vector3.new(destination.X, targetY, destination.Z)
-        local riseDistance = math.abs(destination.Y - targetY)
-        if riseDistance > 0.05 then
-            local elapsed = 0
-            local duration = math.max(0.05, riseDistance / moveSpeed)
-            while elapsed < duration and value and not c().StopWalking and hum.Health > 0 do
-                local dt = RunService.Heartbeat:Wait()
-                elapsed += math.max(dt, 1/240)
-                local alpha = math.min(1, elapsed / duration)
-                local y = targetY + (destination.Y - targetY) * alpha
-                hrp:PivotTo(CFrame.new(destination.X, y, destination.Z))
-            end
-        end
-        if value and not c().StopWalking and hum.Health > 0 then
-            hrp:PivotTo(CFrame.new(destination.X, destination.Y, destination.Z))
-        end
+        moveRoot(Vector3.new(destination.X, destination.Y, destination.Z))
     end
     c().Running = false
     return value and not c().StopWalking and hum.Health > 0
 end
 
-function Sf:Teleport(destination, value, t, speed)
-    if farmMovementEnabled(value) then
-        return self:MoveUnderground(destination, value, speed)
-    end
-    if not destination then return end
+function Sf:MoveVehicleUnderground(vehicle, destination, value, speed)
+    if not vehicle or not vehicle.PrimaryPart or not destination or not value then return false end
+    local hum = Client.Character and Client.Character:FindFirstChildOfClass("Humanoid")
+    if not hum or not hum.Sit then return false end
+
+    local startPivot = vehicle:GetPivot()
+    local start = startPivot.Position
+    local depth = math.abs(Config.UndergroundDepth or 12)
+    local targetY = destination.Y - depth
+    local startY = start.Y - depth
+    local moveSpeed = math.max(1, speed or Config.WalkingSpeed or 35)
+    local horizontal = Vector3.new(destination.X - start.X, 0, destination.Z - start.Z)
+    local distance = horizontal.Magnitude
+    local rotation = startPivot.Rotation
+
+    c().Running = true
     c().StopWalking = false
-    c()['Running'] = true
-    local char = Client.Character or Client.CharacterAdded:Wait()
-    local RootPart = char:WaitForChild("HumanoidRootPart")
-    local Humanoid = char:WaitForChild("Humanoid")
-    local maxAttempts = 3
-    local attempt = 0
-    local pathSuccess = false
-    local waypoints = nil
-    while attempt < maxAttempts and not pathSuccess and value do
-        attempt = attempt + 1
-        local path = PathfindingService:CreatePath({
-            AgentCanJump = true,
-            AgentJumpHeight = 2.5,
-            AgentHeight = 8,
-            AgentRadius = 2.5,
-            AgentMaxSlope = 90,
-            Costs = {BlockedNode = 50, DoorArea = 1}
-        })
-        local success = pcall(function()
-            path:ComputeAsync(RootPart.Position, destination)
-        end)
-        if success and path.Status == Enum.PathStatus.Success then
-            pathSuccess = true
-            waypoints = path:GetWaypoints()
-        else
-            task.wait(0.2)
+
+    local function pivotAt(pos)
+        vehicle:PivotTo(CFrame.new(pos) * rotation)
+    end
+
+    -- 1) ขึ้นยานพาหนะแล้วลงใต้ดิน
+    local downDistance = math.abs(start.Y - startY)
+    if downDistance > 0.05 then
+        local elapsed = 0
+        local duration = math.max(0.05, downDistance / moveSpeed)
+        while elapsed < duration and value and not c().StopWalking and hum.Health > 0 and hum.Sit do
+            local dt = RunService.Heartbeat:Wait()
+            elapsed += math.max(dt, 1/240)
+            local alpha = math.min(1, elapsed / duration)
+            pivotAt(Vector3.new(start.X, start.Y + (startY - start.Y) * alpha, start.Z))
         end
     end
-    if not pathSuccess or not waypoints then
-        local delta = destination - RootPart.Position
-        local dist = delta.Magnitude
-        if dist < 0.05 then
-            c().Running = false
-            ClearPathLines()
-            return true
+
+    -- 2) วิ่งใต้ดินไปยังพิกัดเป้าหมาย
+    if distance > 0.05 then
+        local moved = 0
+        while moved < distance and value and not c().StopWalking and hum.Health > 0 and hum.Sit do
+            local dt = RunService.Heartbeat:Wait()
+            moved = math.min(distance, moved + moveSpeed * math.max(dt, 1/240))
+            local alpha = moved / distance
+            local pos = start + horizontal.Unit * moved
+            local y = startY + (targetY - startY) * alpha
+            pivotAt(Vector3.new(pos.X, y, pos.Z))
         end
-        local dir = delta.Unit
-        local speed = speed or Config.WalkingSpeed
-        local startTime = tick()
-        local movedDist = 0
-        while movedDist < dist and not c().StopWalking and value do
-            task.wait()
-            c()['Running'] = true
-            if c().StopWalking or not value or Humanoid.Health <= 0 then
-                c()['Running'] = false
-                break
-            end
-            local elapsedTime = tick() - startTime
-            movedDist = math.min(elapsedTime * speed, dist)
-            local newPos = RootPart.Position + dir * movedDist
-            if Humanoid.Sit then Humanoid.Sit = false end
-            RootPart:PivotTo(CFrame.new(newPos))
-            Sf:Ac("set_sprinting_1", true)
-        end
-        c()['Running'] = false
-        ClearPathLines()
-        return
     end
-    DrawPath(waypoints)
-    for _, wp in pairs(waypoints) do
-        local offsetY = (wp.Action == Enum.PathWaypointAction.Jump) and 10 or 4
-        local targetPos = wp.Position + Vector3.new(0, offsetY, 0)
-        local startPos = RootPart.Position
-        local delta = targetPos - startPos
-        local dist = delta.Magnitude
-        if dist < 0.05 then
-            continue
-        end
-        local dir = delta.Unit
-        local movedDist = 0
-        local speed = speed or Config.WalkingSpeed
-        local startTime = tick()
-        while movedDist < dist and not c().StopWalking and value do
-            task.wait()
-            c()['Running'] = true
-            if c().StopWalking or not value or Humanoid.Health <= 0 then
-                c()['Running'] = false
-                break
-            end
-            local elapsedTime = tick() - startTime
-            movedDist = math.min(elapsedTime * speed, dist)
-            local newPos = startPos + dir * movedDist
-            if Humanoid.Sit then Humanoid.Sit = false end
-            RootPart:PivotTo(CFrame.new(newPos))
-            Sf:Ac("set_sprinting_1", true)
-        end
-        c()['Running'] = false
-        if not value then break end
+
+    -- 3) ถึงเป้าหมายแล้วค่อยขึ้นมาบนพื้น
+    if value and not c().StopWalking and hum.Health > 0 and hum.Sit then
+        pivotAt(Vector3.new(destination.X, destination.Y, destination.Z))
     end
-    c()['Running'] = false
-    ClearPathLines()
+
+    c().Running = false
+    return value and not c().StopWalking and hum.Health > 0 and hum.Sit
 end
-local function shouldContinue(value)
-    if value == nil then
-        return c().AutoFarmATM
-    end
-    return value
-end
-function Sf:EnterVehicle(vehicle, timeout)
-    if not vehicle or not vehicle.PrimaryPart then return false end
-    timeout = timeout or 8
-    local startTime = tick()
-    while not Humanoid.Sit and tick() - startTime < timeout do
-        if not vehicle.PrimaryPart then return false end
-        for _, prompt in pairs(vehicle.PrimaryPart:GetDescendants()) do
-            if prompt:IsA('ProximityPrompt') then
-                fireproximityprompt(prompt)
-                task.wait(0.15)
-            end
-        end
-        task.wait(0.2)
-    end
-    return Humanoid.Sit
-end
-function Sf:ExitVehicle(timeout)
-    timeout = timeout or 4
-    if not Humanoid.Sit then return true end
-    Net.get("exit_seat")
-    local startTime = tick()
-    while Humanoid.Sit and tick() - startTime < timeout do
-        task.wait(0.15)
-    end
-    return not Humanoid.Sit
-end
-function Sf:Drive(model, destination, value, t, stopDist, onArrive)
-    if not model or not model.PrimaryPart then
-        c()['Running'] = false
-        return
-    end
-    c()["StopWalking"] = false
-    local maxAttempts = 3
-    local attempt = 0
-    local pathSuccess = false
-    local waypoints = nil
-    while attempt < maxAttempts and not pathSuccess and shouldContinue(value) do
-        attempt = attempt + 1
-        local path = PathfindingService:CreatePath({
-            AgentRadius = c().VechineType == "car" and 5 or 3,
-            AgentHeight = 8,
-            AgentCanJump = true,
-            AgentMaxSlope = 50,
-            AgentCanClimb = false,
-            WaypointSpacing = 6,
-            Costs = {
-                BlockedNode = 100,
-                Cars = 1,
-                Water = math.huge,
-                DoorArea = 1
-            }
-        })
-        local success = pcall(function()
-            path:ComputeAsync(model.PrimaryPart.Position, destination)
-        end)
-        if success and path.Status == Enum.PathStatus.Success then
-            pathSuccess = true
-            waypoints = path:GetWaypoints()
-        else
-            task.wait(0.2)
-        end
-    end
-    if not pathSuccess or not waypoints then
-        local dir = (destination - model.PrimaryPart.Position).Unit
-        local dist = (destination - model.PrimaryPart.Position).Magnitude
-        local speed = c().DrivingSpeed
-        local startTime = tick()
-        local movedDist = 0
-        while movedDist < dist and shouldContinue(value) do
-            task.wait(0)
-            if not model or not model.PrimaryPart then break end
-            if not Humanoid.Sit then
-                if not Sf:EnterVehicle(model, 3) then break end
-            end
-            local dt = tick() - startTime
-            movedDist = math.min(dt * speed, dist)
-            local newPos = model.PrimaryPart.Position + dir * movedDist
-            local Rotation = CFrame.lookAt(newPos, newPos + dir)
-            model:PivotTo(Rotation)
-            for _, part in pairs(model:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    part.AssemblyLinearVelocity = Vector3.zero
-                    part.AssemblyAngularVelocity = Vector3.zero
-                end
-            end
-            if stopDist and (model.PrimaryPart.Position - destination).Magnitude <= stopDist then
-                if onArrive then onArrive() end
-                break
-            end
-        end
-        c()['Running'] = false
-        ClearPathLines()
-        return
-    end
-    DrawPath(waypoints)
-    for i, wp in pairs(waypoints) do
-        if not model or not model.PrimaryPart then
-            c()['Running'] = false
-            return
-        end
-        if not Humanoid.Sit then
-            if not Sf:EnterVehicle(model, 4) then
-                c()['Running'] = false
-                return
-            end
-        end
-        local startPos = model:GetPivot().Position
-        local heightOffset = 2
-        if wp.Action == Enum.PathWaypointAction.Jump then heightOffset = 8 end
-        local goalPos = wp.Position + Vector3.new(0, heightOffset, 0)
-        local dir = (goalPos - startPos).Unit
-        if dir.Magnitude < 0.001 then dir = Vector3.new(1, 0, 0) end
-        local dist = (goalPos - startPos).Magnitude
-        local movedDist = 0
-        local speed = c().DrivingSpeed
-        local startTime = tick()
-        local reached = false
-        while movedDist < dist and shouldContinue(value) do
-            task.wait(0)
-            if not model or not model.PrimaryPart then
-                c()['Running'] = false
-                return
-            end
-            c()['Running'] = true
-            if not shouldContinue(value) then
-                c()['Running'] = false
-                break
-            end
-            if not Humanoid.Sit then
-                if not Sf:EnterVehicle(model, 3) then
-                    c()['Running'] = false
-                    return
-                end
-            end
-            local dt = tick() - startTime
-            movedDist = math.min(dt * speed, dist)
-            local newPos = startPos + dir * movedDist
-            local Rotation = CFrame.lookAt(newPos, newPos + dir)
-            model:PivotTo(Rotation)
-            for _, part in pairs(model:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    part.AssemblyLinearVelocity = Vector3.zero
-                    part.AssemblyAngularVelocity = Vector3.zero
-                end
-            end
-            if stopDist and (model.PrimaryPart.Position - destination).Magnitude <= stopDist then
-                reached = true
-                break
-            end
-        end
-        c()['Running'] = false
-        if not shouldContinue(value) then break end
-        if reached and onArrive then
-            onArrive()
-            break
-        end
-    end
-    c()['Running'] = false
-    ClearPathLines()
-end
-SafeHeight = {
-    MinCharacter = 200,
-    MinVehicle = 200,
-    Emergency = 50,
-    RespawnHeight = 260
-}
-task.spawn(function()
-    while task.wait(0) do
-        pcall(function()
-            if not c().AutoFarmATM then return end
-            if c().UndergroundMovement then return end
-            for _, vehicle in pairs(workspace.Vehicles:GetChildren()) do
-                if vehicle:GetAttribute('OwnerUserId') == UserId and vehicle.PrimaryPart then
-                    local currentY = vehicle.PrimaryPart.Position.Y
-                    for _, part in pairs(vehicle:GetDescendants()) do
-                        if part:IsA("BasePart") then
-                            if part.AssemblyLinearVelocity.Magnitude > 100 then
-                                part.AssemblyLinearVelocity = part.AssemblyLinearVelocity.Unit * 100
-                            end
-                            local verticalVelocity = part.AssemblyLinearVelocity.Y
-                            if verticalVelocity > 15 then
-                                part.AssemblyLinearVelocity = Vector3.new(
-                                    part.AssemblyLinearVelocity.X,
-                                    -5,
-                                    part.AssemblyLinearVelocity.Z
-                                )
-                            end
-                            if math.abs(part.AssemblyAngularVelocity.X) > 5 or math.abs(part.AssemblyAngularVelocity.Z) > 5 then
-                                part.AssemblyAngularVelocity = Vector3.new(0, part.AssemblyAngularVelocity.Y, 0)
-                            end
-                        end
-                    end
-                    local downforce = 15
-                    local maxHeightAboveGround = 8
-                    local rayOrigin = vehicle.PrimaryPart.Position
-                    local rayDirection = Vector3.new(0, -100, 0)
-                    local raycastParams = RaycastParams.new()
-                    raycastParams.FilterDescendantsInstances = {vehicle, Character}
-                    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-                    local rayResult = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
-                    if rayResult then
-                        local distanceToGround = (rayOrigin - rayResult.Position).Magnitude
-                        if distanceToGround > maxHeightAboveGround then
-                            for _, part in pairs(vehicle:GetDescendants()) do
-                                if part:IsA("BasePart") then
-                                    part.AssemblyLinearVelocity = Vector3.new(
-                                        part.AssemblyLinearVelocity.X,
-                                        -downforce,
-                                        part.AssemblyLinearVelocity.Z
-                                    )
-                                end
-                            end
-                        end
-                    end
-                    if currentY < SafeHeight.Emergency then
-                        vehicle:PivotTo(RootPart.CFrame * CFrame.new(0, 10, 0))
-                        for _, part in pairs(vehicle:GetDescendants()) do
-                            if part:IsA("BasePart") then
-                                part.Velocity = Vector3.zero
-                                part.RotVelocity = Vector3.zero
-                                part.AssemblyLinearVelocity = Vector3.zero
-                                part.AssemblyAngularVelocity = Vector3.zero
-                                part.Anchored = true
-                                task.wait(0)
-                                part.Anchored = false
-                            end
-                        end
-                    elseif currentY < SafeHeight.MinVehicle then
-                        local targetPos = Vector3.new(
-                            vehicle.PrimaryPart.Position.X,
-                            SafeHeight.RespawnHeight,
-                            vehicle.PrimaryPart.Position.Z
-                        )
-                        vehicle:PivotTo(CFrame.new(targetPos) * vehicle:GetPivot().Rotation)
-                        for _, part in pairs(vehicle:GetDescendants()) do
-                            if part:IsA("BasePart") then
-                                part.Velocity = Vector3.zero
-                                part.RotVelocity = Vector3.zero
-                                part.AssemblyLinearVelocity = Vector3.zero
-                                part.AssemblyAngularVelocity = Vector3.zero
-                            end
-                        end
-                    end
-                end
-            end
-        end)
-    end
-end)
-task.spawn(function()
-    while task.wait(0) do
-        pcall(function()
-            if not Character or not RootPart then return end
-            if not c().AutoFarmATM then return end
-            if c().UndergroundMovement then return end
-            local currentY = RootPart.Position.Y
-            if currentY < SafeHeight.Emergency then
-                RootPart.Anchored = true
-                RootPart.CFrame = CFrame.new(
-                    RootPart.Position.X,
-                    SafeHeight.RespawnHeight,
-                    RootPart.Position.Z
-                )
-                task.wait(0)
-                RootPart.Anchored = false
-            elseif currentY < SafeHeight.MinCharacter then
-                RootPart.CFrame = CFrame.new(
-                    RootPart.Position.X,
-                    SafeHeight.RespawnHeight,
-                    RootPart.Position.Z
-                )
-                if RootPart.AssemblyLinearVelocity.Y < -50 then
-                    RootPart.AssemblyLinearVelocity = Vector3.new(
-                        RootPart.AssemblyLinearVelocity.X,
-                        0,
-                        RootPart.AssemblyLinearVelocity.Z
-                    )
-                end
-            end
-        end)
-    end
-end)
-StateController = {
-    JobSystemActive = false,
-    JobCoroutine = nil,
-    LastDepositTime = 0,
-    IsDepositing = false,
-}
-function StateController:StopJob()
-    self.JobSystemActive = false
-    Config.StartFarmJob = false
-    if self.JobCoroutine then
-        local s = coroutine.status(self.JobCoroutine)
-        if s == "running" or s == "suspended" then pcall(task.cancel, self.JobCoroutine) end
-        self.JobCoroutine = nil
-    end
-    Sf:ForceStop()
-    ClearPathLines()
-end
-function StateController:StartJob()
-    if self.JobSystemActive then return end
-    self.JobSystemActive = true
-    Config.StartFarmJob = true
-    if not self.JobCoroutine or coroutine.status(self.JobCoroutine) == "dead" then
-        self.JobCoroutine = task.spawn(function()
-            if func['StartFarmJob'] then func['StartFarmJob']() end
-        end)
-    end
-end
+
 local function FarmTeleport(destination, value, speed)
     if not destination or not value then return false end
     if Config.UndergroundMovement then
@@ -1578,11 +1229,17 @@ func['AutoFarmATM'] = function()
                                     local atmPos = closestATM.Area.Position
                                     local dist = Sf:dist(closestATM.Area)
                                     if Config.UndergroundMovement and c().AutoFarmATM then
-                                        if Humanoid.Sit then
-                                            Sf:ExitVehicle(4)
+                                        if not Humanoid.Sit then
+                                            Sf:PullVehicle()
+                                            task.wait(0.2)
+                                            Sf:EnterVehicle(vehicle, 6)
                                             task.wait(0.2)
                                         end
-                                        FarmTeleport(atmPos, c().AutoFarmATM, Config.WalkingSpeed)
+                                        if Humanoid.Sit then
+                                            Sf:MoveVehicleUnderground(vehicle, atmPos, c().AutoFarmATM, Config.WalkingSpeed)
+                                        else
+                                            FarmTeleport(atmPos, c().AutoFarmATM, Config.WalkingSpeed)
+                                        end
                                         dist = Sf:dist(closestATM.Area)
                                     elseif dist > 15 then
                                         local driveThread = task.spawn(function()
@@ -1783,11 +1440,20 @@ func['AutoFarmFishing'] = function()
             end
         end
         if Config.UndergroundMovement and Config.AutoFarmFishing then
+            if not Humanoid.Sit then
+                Sf:PullVehicle()
+                task.wait(0.3)
+                Sf:EnterVehicle(vehicle, 6)
+                task.wait(0.2)
+            end
             if Humanoid.Sit then
+                Sf:MoveVehicleUnderground(vehicle, fishingSpot, Config.AutoFarmFishing, Config.WalkingSpeed)
+                task.wait(0.15)
                 Sf:ExitVehicle(4)
                 task.wait(0.15)
+            else
+                FarmTeleport(fishingSpot, Config.AutoFarmFishing, Config.WalkingSpeed)
             end
-            FarmTeleport(fishingSpot, Config.AutoFarmFishing, Config.WalkingSpeed)
         elseif Humanoid.Sit then
             Sf:Drive(vehicle, fishingSpot, Config.AutoFarmFishing, nil, 5, function()
                 Sf:ExitVehicle(4)
