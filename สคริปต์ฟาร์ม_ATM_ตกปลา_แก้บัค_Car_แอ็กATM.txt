@@ -1455,7 +1455,7 @@ func['AutoFarmATM'] = function()
         local vehiclesFolder = workspace:FindFirstChild('Vehicles')
         if vehiclesFolder then
             for _, vehicle in pairs(vehiclesFolder:GetChildren()) do
-                if vehicle:GetAttribute('OwnerUserId') == UserId and Sf:IsVehicleType(vehicle, c().VechineType, vehicleName) then
+                if vehicle:GetAttribute('OwnerUserId') == UserId and (Sf:IsVehicleType(vehicle, c().VechineType, vehicleName) or (c().VechineType == 'Car' and vehicle:IsA('Model') and vehicle.PrimaryPart)) then
                     existingVehicle = vehicle
                     break
                 end
@@ -1483,7 +1483,7 @@ func['AutoFarmATM'] = function()
                 foundVehicle = true
                 break
             end
-            if vehicle:GetAttribute('OwnerUserId') == UserId and Sf:IsVehicleType(vehicle, c().VechineType, vehicleName) then
+            if vehicle:GetAttribute('OwnerUserId') == UserId and (Sf:IsVehicleType(vehicle, c().VechineType, vehicleName) or (c().VechineType == 'Car' and vehicle:IsA('Model') and vehicle.PrimaryPart)) then
                 Sf:Ac("lock_vehicle", vehicle, true)
                 foundVehicle = true
                 retryCount = 0
@@ -1730,11 +1730,18 @@ func['AutoFarmATM'] = function()
 
                                     if Humanoid.Sit then
                                         Sf:ExitVehicle(4)
-                                        task.wait(0.35)
+                                        task.wait(0.65)
                                     end
-                                    -- รถยนต์ต้องไม่ทับตำแหน่ง ATM ตอนเริ่ม remote hack
+                                    -- แยกรถออกจากจุด ATM ก่อนเริ่ม remote hack โดยเฉพาะ Car
+                                    if c().VechineType == 'Car' then
+                                        local ownedVehicle = vehicle
+                                        if ownedVehicle and ownedVehicle.PrimaryPart and closestATM and closestATM:FindFirstChild('Area') then
+                                            local parkPos = closestATM.Area.Position + Vector3.new(0, 0, 10)
+                                            ownedVehicle:PivotTo(CFrame.new(parkPos) * ownedVehicle:GetPivot().Rotation)
+                                        end
+                                    end
                                     Sf:PlaceVehicleOnGround()
-                                    task.wait(0.2)
+                                    task.wait(0.5)
 
                                     hackInfo = Sf:GetInfo(currentHackTool)
                                     if hackInfo and hackInfo[2] and hackInfo[3] and c().AutoFarmATM then
