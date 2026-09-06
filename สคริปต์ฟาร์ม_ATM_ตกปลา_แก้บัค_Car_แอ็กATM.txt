@@ -617,9 +617,16 @@ function Sf:GetLevel()
     return level or 1
 end
 function Sf:CheckingIsMinigame()
+    -- รองรับโครงสร้าง GUI หลายแบบ เพราะบางครั้ง Frame ไม่ได้เป็นลูกโดยตรงของ SliderMinigame
     local gui = PlayerGui:FindFirstChild("SliderMinigame")
-    local frame = gui and gui:FindFirstChildOfClass("Frame")
-    return frame and frame.Visible or false
+    if not gui then return false end
+    if gui:IsA("GuiObject") and gui.Visible then return true end
+    for _, obj in ipairs(gui:GetDescendants()) do
+        if obj:IsA("GuiObject") and obj.Visible then
+            return true
+        end
+    end
+    return false
 end
 function Sf:ForceStop()
     if c()['Running'] then
@@ -1700,8 +1707,7 @@ func['AutoFarmATM'] = function()
                                         Sf:PlaceVehicleOnGround()
                                         break
                                     end
-                                    -- เตรียม HackTool ให้ถูกต้องก่อนเริ่มแอ็ก ATM
-                                    -- ปัญหาเดิม: มี HackTool อยู่ใน inventory แต่ไม่ได้ equip จริง ทำให้ request_begin_hacking_3 ไม่ทำงาน
+                                    -- เตรียม HackTool + จุด interaction ก่อนส่ง request
                                     local hackSent = false
                                     local hackInfo = Sf:GetInfo(currentHackTool)
                                     if hackInfo and hackInfo[2] and hackInfo[3] then
@@ -1711,109 +1717,104 @@ func['AutoFarmATM'] = function()
                                             end)
                                             local equipStart = tick()
                                             repeat
-                                                task.wait(0.05)
+                                                task.wait(0.1)
                                                 hackInfo = Sf:GetInfo(currentHackTool)
-                                            until (hackInfo and hackInfo[4]) or (tick() - equipStart) > 2 or not c().AutoFarmATM
+                                            until (hackInfo and hackInfo[4]) or (tick() - equipStart) > 3 or not c().AutoFarmATM
                                         end
                                     end
 
-                                    -- เตรียมจุดโต้ตอบจริงของ ATM ก่อนเริ่ม hack
                                     local atmArea = closestATM and closestATM:FindFirstChild("Area")
                                     local hackPos = atmArea and atmArea.Position or nil
+                                    local hackPrompt = nil
                                     if closestATM then
                                         for _, obj in ipairs(closestATM:GetDescendants()) do
                                             if obj:IsA("ProximityPrompt") and obj.Enabled then
+                                                hackPrompt = obj
                                                 local pp = obj.Parent
                                                 if pp and pp:IsA("BasePart") then
                                                     hackPos = pp.Position
-                                                    break
                                                 end
+                                                break
                                             end
                                         end
                                     end
 
+                                    -- ออกจากรถให้เสร็จก่อน และจอดรถไม่ให้บัง interaction
                                     if Humanoid.Sit then
                                         Sf:ExitVehicle(4)
                                         local exitStart = tick()
-                                        while Humanoid.Sit and tick() - exitStart < 4 do task.wait(0.05) end
-                                        task.wait(0.75)
+                                        while Humanoid.Sit and tick() - exitStart < 4 do
+                                            task.wait(0.05)
+                                        end
                                     end
-
-                                    -- รถต้องถูกจอดออกจาก ATM และปล่อยฟิสิกส์ก่อนเริ่ม hack
-                                    local ownedVehicle = vehicle
-                                    if ownedVehicle and ownedVehicle.PrimaryPart and hackPos then
-                                        local parkPos = hackPos + Vector3.new(0, 0, 12)
+                                    task.wait(0.5)
+                                    if vehicle and vehicle.PrimaryPart and hackPos then
                                         pcall(function()
-                                            ownedVehicle:PivotTo(CFrame.new(parkPos) * ownedVehicle:GetPivot().Rotation)
+                                            local rot = vehicle:GetPivot().Rotation
+                                            vehicle:PivotTo(CFrame.new(hackPos + Vector3.new(0, 0, 14)) * rot)
                                         end)
                                         task.wait(0.25)
                                     end
                                     Sf:PlaceVehicleOnGround()
-                                    task.wait(0.5)
+                                    task.wait(0.35)
 
-                                    -- ย้ายตัวละครไปยังจุด interaction จริง ไม่ใช้ Area อย่างเดียว
+                                    -- ย้ายตัวละครไปยืนในระยะ prompt จริง
                                     if hackPos and c().AutoFarmATM then
-                                        local target = hackPos + Vector3.new(0, 2.5, 0)
+                                        local target = hackPos + Vector3.new(0, 2, 0)
                                         pcall(function()
+                                            RootPart.Anchored = true
                                             RootPart.CFrame = CFrame.lookAt(target, hackPos)
                                         end)
-                                        task.wait(0.35)
-                                        if (RootPart.Position - hackPos).Magnitude > 8 then
-                                            pcall(function()
-                                                RootPart.Anchored = true
-                                                RootPart.CFrame = CFrame.lookAt(target, hackPos)
-                                            end)
-                                            task.wait(0.15)
-                                            RootPart.Anchored = false
-                                        end
+                                        task.wait(0.2)
+                                        pcall(function() RootPart.Anchored = false end)
                                     end
 
                                     hackInfo = Sf:GetInfo(currentHackTool)
                                     if hackInfo and hackInfo[2] and hackInfo[3] and c().AutoFarmATM then
-                                        -- บางเซิร์ฟเวอร์ต้องเห็นการ interaction ก่อน request hack
-                                        if closestATM then
-                                            for _, obj in ipairs(closestATM:GetDescendants()) do
-                                                if obj:IsA("ProximityPrompt") and obj.Enabled then
-                                                    pcall(function() fireproximityprompt(obj) end)
-                                                    task.wait(0.15)
-                                                    if Sf:CheckingIsMinigame() then break end
-                                                end
-                                            end
+                                        -- ลอง ProximityPrompt ก่อน ถ้าเกมใช้ prompt เป็นตัวเปิด hack
+                                        if hackPrompt then
+                                            pcall(function()
+                                                fireproximityprompt(hackPrompt, 1, true)
+                                            end)
+                                            task.wait(0.3)
                                         end
-                                        -- ส่ง request หลายครั้ง เผื่อ UI/remote โหลดช้า
-                                        for attempt = 1, 7 do
-                                            if not c().AutoFarmATM then break end
-                                            if #c().keys >= 3 and closestATM:GetAttribute(c().keys[3]) then break end
 
-                                            -- equip ซ้ำถ้าสถานะ UI ยังไม่ทันอัปเดต
+                                        -- ส่ง request จนกว่า SliderMinigame จะถูกสร้างจริง
+                                        for attempt = 1, 10 do
+                                            if not c().AutoFarmATM then break end
+                                            if Sf:CheckingIsMinigame() then
+                                                hackSent = true
+                                                break
+                                            end
+
                                             hackInfo = Sf:GetInfo(currentHackTool)
-                                            if hackInfo and not hackInfo[4] and hackInfo[3] then
+                                            if hackInfo and hackInfo[3] and not hackInfo[4] then
                                                 pcall(function()
                                                     Net.get("toggle_equip_item", tostring(hackInfo[3]))
                                                 end)
-                                                task.wait(0.12)
+                                                task.wait(0.2)
                                             end
 
                                             pcall(function()
                                                 Sf:Ac("request_begin_hacking_3", closestATM, currentHackTool)
                                             end)
+
                                             local waitStart = tick()
                                             repeat
-                                                task.wait(0.05)
-                                            until Sf:CheckingIsMinigame() or (tick() - waitStart) > 2 or not c().AutoFarmATM
+                                                task.wait(0.1)
+                                            until Sf:CheckingIsMinigame() or tick() - waitStart > 2.5 or not c().AutoFarmATM
 
                                             if Sf:CheckingIsMinigame() then
                                                 hackSent = true
                                                 break
                                             end
-                                            task.wait(0.35)
+                                            task.wait(0.25)
                                         end
                                     end
 
                                     if hackSent and c().AutoFarmATM then
-                                        -- ส่งผลสำเร็จหลัง minigame เปิดแล้ว
-                                        -- ไม่รอให้ UI ปิดเอง เพราะบางเซิร์ฟเวอร์จะค้างจนกว่าจะได้รับ atm_win_3
-                                        task.wait(1.2)
+                                        -- ให้ minigame มีเวลาทำงานก่อนส่งผลสำเร็จ
+                                        task.wait(1.5)
                                         pcall(function()
                                             Sf:Ac("atm_win_3", closestATM)
                                         end)
@@ -1823,6 +1824,7 @@ func['AutoFarmATM'] = function()
                                     else
                                         Sf:PlaceVehicleOnGround()
                                     end
+
                                     if c().AutoFarmATM then
                                         if vehicle and vehicle.PrimaryPart then
                                             Sf:EnterVehicle(vehicle, 6)
