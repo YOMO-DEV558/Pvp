@@ -4,7 +4,7 @@
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
 local Window = WindUI:CreateWindow({
-    Title = "🎣 Fishing Farm",
+    Title = "🎣 Fishing",
     Icon = "fish",
     Author = "WindUI",
     Folder = "FishingFarm",
@@ -41,6 +41,182 @@ local function WindNotify(title, content)
     end)
 end
 
+-- ============================================================
+-- Runtime dependencies (ทำให้ไฟล์นี้ทำงานเดี่ยวได้)
+-- ============================================================
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Client = Players.LocalPlayer
+local UserId = Client.UserId
+local PlayerGui = Client:WaitForChild("PlayerGui")
+local Character = Client.Character or Client.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
+local RootPart = Character:WaitForChild("HumanoidRootPart")
+local Backpack = Client:WaitForChild("Backpack")
+local Net = require(ReplicatedStorage.Modules.Core.Net)
+local Sf = {}
+
+Client.CharacterAdded:Connect(function(char)
+    Character = char
+    Humanoid = char:WaitForChild("Humanoid")
+    RootPart = char:WaitForChild("HumanoidRootPart")
+    Backpack = Client:WaitForChild("Backpack")
+end)
+
+local function getInventoryFrame()
+    local items = PlayerGui:FindFirstChild("Items")
+    local holder = items and items:FindFirstChild("ItemsHolder")
+    return holder and holder:FindFirstChild("ItemsScrollingFrame")
+end
+
+function Sf:GetInfo(itemName)
+    local amount, having, uid, using, destroyed = 0, false, nil, false, false
+    local frame = getInventoryFrame()
+    if not frame then return {0, false, nil, false, false} end
+    for _, item in ipairs(frame:GetChildren()) do
+        local label = item:FindFirstChild("ItemName")
+        if label and tostring(label.Text) == tostring(itemName) then
+            amount += 1
+            having = true
+            uid = item.Name
+            local equipped = item:FindFirstChild("ItemEquipped")
+            local broken = item:FindFirstChild("DestroyedItemIcon")
+            using = equipped and equipped.Visible or false
+            destroyed = broken and broken.Visible or false
+        end
+    end
+    return {amount, having, uid, using, destroyed}
+end
+
+function Sf:GetLevel()
+    local skills = PlayerGui:FindFirstChild("Skills")
+    local holder = skills and skills:FindFirstChild("SkillsHolder")
+    local scrolling = holder and holder:FindFirstChild("SkillsScrollingFrame")
+    local card = scrolling and scrolling:FindFirstChild("PlayerCard")
+    local viewport = card and card:FindFirstChild("SkillPlayerViewport")
+    local frame = viewport and viewport:FindFirstChild("Frame")
+    local levelCard = frame and frame:FindFirstChild("ViewportSkillLevelCard")
+    local label = levelCard and levelCard:FindFirstChild("TextLabel")
+    return tonumber(label and label.Text:match("%d+")) or 1
+end
+
+function Sf:GetMoney()
+    local ok, text = pcall(function()
+        return PlayerGui.TopRightHud.Holder.Frame.MoneyTextLabel.Text
+    end)
+    if not ok or not text then return 0 end
+    return tonumber((text:match("%$([%d,]+)") or "0"):gsub(",", "")) or 0
+end
+
+function Sf:ATMMoney()
+    for _, v in ipairs(PlayerGui:GetDescendants()) do
+        if v:IsA("TextLabel") and tostring(v.Text):find("Bank Balance", 1, true) then
+            return tonumber((v.Text:gsub(",", ""):match("%$(%d+)") or "0")) or 0
+        end
+    end
+    return 0
+end
+
+function Sf:IsVehicleType(vehicle, desiredType)
+    if not vehicle or not desiredType then return false end
+    local wanted = tostring(desiredType):lower()
+    for _, attrName in ipairs({"VehicleType", "VehicleClass", "ItemType", "Type"}) do
+        local attr = vehicle:GetAttribute(attrName)
+        if attr then
+            local a = tostring(attr):lower()
+            if (wanted == "bike" and (a == "bike" or a == "bicycle")) or (wanted == "car" and a == "car") then
+                return true
+            end
+        end
+    end
+    local n = tostring(vehicle.Name):lower()
+    if wanted == "bike" then
+        return n:find("bike", 1, true) ~= nil or n:find("bmx", 1, true) ~= nil
+    end
+    return n:find("car", 1, true) ~= nil
+end
+
+function Sf:GetCarFromType(types)
+    local frame = getInventoryFrame()
+    if not frame then return nil end
+    for _, item in ipairs(frame:GetChildren()) do
+        local itemType = tostring(item:GetAttribute("ItemType") or ""):lower()
+        if (types == "Bike" and itemType == "bike") or (types == "Car" and itemType == "car") then
+            local label = item:FindFirstChild("ItemName")
+            if label then return label.Text end
+        end
+    end
+    return nil
+end
+
+function Sf:PullVehicle()
+    local folder = workspace:FindFirstChild("Vehicles")
+    local root = Character:FindFirstChild("HumanoidRootPart")
+    if not folder or not root then return nil end
+    for _, vehicle in ipairs(folder:GetChildren()) do
+        if vehicle:IsA("Model") and tostring(vehicle:GetAttribute("OwnerUserId")) == tostring(UserId) and vehicle.PrimaryPart then
+            local pos = (root.CFrame * CFrame.new(0, 3, -12)).Position
+            vehicle:PivotTo(CFrame.new(pos) * vehicle:GetPivot().Rotation)
+            for _, part in ipairs(vehicle:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.Anchored = false
+                    part.AssemblyLinearVelocity = Vector3.zero
+                    part.AssemblyAngularVelocity = Vector3.zero
+                end
+            end
+            return vehicle
+        end
+    end
+    return nil
+end
+
+function Sf:EnterVehicle(vehicle, timeout)
+    if not vehicle or not vehicle.PrimaryPart then return false end
+    timeout = timeout or 8
+    local started = os.clock()
+    while not Humanoid.Sit and os.clock() - started < timeout do
+        if not vehicle.Parent or not vehicle.PrimaryPart then return false end
+        local fired = false
+        if typeof(fireproximityprompt) == "function" then
+            for _, prompt in ipairs(vehicle:GetDescendants()) do
+                if prompt:IsA("ProximityPrompt") and prompt.Enabled then
+                    local ok = pcall(fireproximityprompt, prompt)
+                    fired = ok or fired
+                    if Humanoid.Sit then break end
+                end
+            end
+        end
+        if not fired then
+            pcall(function()
+                RootPart.CFrame = CFrame.new(vehicle.PrimaryPart.Position + Vector3.new(0, 3, 0))
+            end)
+        end
+        task.wait(0.15)
+    end
+    return Humanoid.Sit
+end
+
+function Sf:ExitVehicle(timeout)
+    if not Humanoid.Sit then return true end
+    pcall(function() Net.get("exit_seat") end)
+    local started = os.clock()
+    while Humanoid.Sit and os.clock() - started < (timeout or 4) do task.wait(0.1) end
+    return not Humanoid.Sit
+end
+
+function Sf:ForceStop()
+    for _, v in ipairs(workspace:FindFirstChild("Vehicles") and workspace.Vehicles:GetChildren() or {}) do
+        if tostring(v:GetAttribute("OwnerUserId")) == tostring(UserId) then
+            for _, part in ipairs(v:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.AssemblyLinearVelocity = Vector3.zero
+                    part.AssemblyAngularVelocity = Vector3.zero
+                end
+            end
+        end
+    end
+end
+
 -- ใช้กับโครงสร้างเดิมที่มี Window / Config / Sf / Net / func อยู่แล้ว
 -- จุดสำคัญ: ฟาร์มตกปลาบังคับใช้รถ และทุกการเดินทางของฟาร์มใช้เส้นทางใต้ดินเสมอ
 
@@ -66,8 +242,8 @@ local FishingBaits = {
 -- ============================================================
 -- 2) Config - ไม่ใช้ toggle underground เพราะบังคับเปิด
 -- ============================================================
-Config = Config or {}
-func = func or {}
+local Config = {}
+local func = {}
 
 Config.AutoFarmFishing = Config.AutoFarmFishing or false
 Config.FishingRod = Config.FishingRod or "Smart Select"
@@ -202,27 +378,9 @@ local function ensureFishingVehicle(runId)
     vehicle = getFishingVehicle()
     if vehicle then return vehicle end
 
-    -- ถ้าเลือก Bike และไม่มีรถ ให้ซื้อ/สร้าง bike crate ตามระบบเดิม
-    if Config.FishingVehicleType == "Bike" then
-        pcall(function() Sf:BuyBikeCrate() end)
-        task.wait(0.8)
-    else
-        local vehicleName
-        pcall(function() vehicleName = Sf:GetCarFromType(Config.FishingVehicleType) end)
-        if vehicleName then
-            local info
-            pcall(function() info = Sf:GetInfo(vehicleName) end)
-            if info and info[2] and not info[4] and not info[5] then
-                pcall(function()
-                    Net.get("toggle_equip_item", tostring(info[3]))
-                end)
-                task.wait(0.8)
-            end
-        end
-    end
-
-    vehicle = getFishingVehicle()
-    return vehicle
+    -- ระบบนี้บังคับใช้รถที่มีอยู่แล้ว: ถ้าไม่มีรถจะไม่เริ่มวิ่ง/ไม่เทเลพอร์ตตัวละคร
+    -- เพื่อไม่ให้ลูปค้างหรือเกิดการวาร์ปผิดตำแหน่ง
+    return getFishingVehicle()
 end
 
 local function sitInFishingVehicle(vehicle, runId)
