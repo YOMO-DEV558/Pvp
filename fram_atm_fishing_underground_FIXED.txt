@@ -1,0 +1,203 @@
+-- FIX: Car Usage Bug Corrections
+-- Add these functions and modifications to replace buggy sections
+
+-- FIXED: Proper vehicle speed selection based on type
+function Sf:GetDrivingSpeed(vehicleType)
+    vehicleType = vehicleType or Config.VechineType
+    if vehicleType == "Car" then
+        return Config.DrivingSpeed or 50  -- Cars slower than bikes
+    else
+        return Config.DrivingSpeed or 60  -- Bikes can go faster
+    end
+end
+
+function Sf:GetFishingDrivingSpeed(vehicleType)
+    vehicleType = vehicleType or Config.FishingVehicleType
+    if vehicleType == "Car" then
+        return Config.FishingDrivingSpeed or 50
+    else
+        return Config.FishingDrivingSpeed or 60
+    end
+end
+
+-- FIXED: Improved vehicle type detection
+function Sf:IsVehicleType(vehicle, desiredType)
+    if not vehicle or not desiredType then return false end
+    local wanted = tostring(desiredType):lower()
+    
+    -- Check all possible attributes
+    local attrs = {
+        vehicle:GetAttribute("VehicleType"),
+        vehicle:GetAttribute("VehicleClass"),
+        vehicle:GetAttribute("ItemType"),
+        vehicle:GetAttribute("Type")
+    }
+    
+    for _, attr in ipairs(attrs) do
+        if attr then
+            local a = tostring(attr):lower()
+            if wanted == "bike" and (a == "bike" or a == "bicycle" or a == "bmx") then
+                return true
+            elseif wanted == "car" and a == "car" then
+                return true
+            end
+        end
+    end
+    
+    -- Fallback to name check
+    local vehicleName = tostring(vehicle.Name):lower()
+    if wanted == "bike" then
+        return vehicleName:find("bike", 1, true) ~= nil or vehicleName:find("bmx", 1, true) ~= nil
+    elseif wanted == "car" then
+        return vehicleName:find("car", 1, true) ~= nil or vehicleName:find("sedan", 1, true) ~= nil or vehicleName:find("truck", 1, true) ~= nil
+    end
+    
+    return false
+end
+
+-- FIXED: Wheelie settings check - prevent crashes with cars
+function Sf:CanDoWheelie(vehicleType)
+    vehicleType = vehicleType or Config.VechineType
+    
+    if vehicleType == "Bike" and Config.WheelieOnlyBike then
+        return Config.WheelieEnabled
+    elseif vehicleType == "Bike" and not Config.WheelieOnlyBike then
+        return Config.WheelieEnabled
+    end
+    
+    return false  -- Cars cannot wheelie
+end
+
+function Sf:CanDoFishingWheelie(vehicleType)
+    vehicleType = vehicleType or Config.FishingVehicleType
+    
+    if vehicleType == "Bike" and Config.FishingWheelieOnlyBike then
+        return Config.FishingWheelieEnabled
+    elseif vehicleType == "Bike" and not Config.FishingWheelieOnlyBike then
+        return Config.FishingWheelieEnabled
+    end
+    
+    return false
+end
+
+-- FIXED: Unified vehicle purchase function for both bikes and cars
+function Sf:BuyCrate(vehicleType)
+    vehicleType = vehicleType or Config.VechineType
+    
+    local map = workspace:FindFirstChild("Map")
+    if not map then return false end
+    
+    local tiles = map:FindFirstChild("Tiles")
+    if not tiles then return false end
+    
+    local crateConfig = {
+        ["Bike"] = {
+            path = {"BurgerPlaceTile", "UrbanCyclesAndSkates"},
+            cost = 870,
+            atmCFrame = CFrame.new(179.200882, 255.290543, -236.355896, 0.946762264, 2.58641517e-08, 0.321933597, -2.17450005e-08, 1, -1.63909775e-08, -0.321933597, 8.5179126e-09, 0.946762264)
+        },
+        ["Car"] = {
+            path = {"GarageTile", "CarShop"},  -- Adjust path as needed
+            cost = 1200,
+            atmCFrame = CFrame.new(0, 0, 0)  -- Set proper ATM location
+        }
+    }
+    
+    local config = crateConfig[vehicleType]
+    if not config then return false end
+    
+    local currentFolder = tiles
+    for _, folderName in ipairs(config.path) do
+        currentFolder = currentFolder and currentFolder:FindFirstChild(folderName)
+        if not currentFolder then return false end
+    end
+    
+    local interior = currentFolder and currentFolder:FindFirstChild("Interior")
+    if not interior then return false end
+    
+    local crates = interior:FindFirstChild("Crates")
+    if not crates then return false end
+    
+    local crateName = vehicleType .. " Crate"
+    local vehicleCrate = crates:FindFirstChild(crateName)
+    if not vehicleCrate then return false end
+    
+    local beacon = vehicleCrate:FindFirstChild("Beacon")
+    if not beacon then return false end
+    
+    local touchPart = beacon:FindFirstChild("TouchPart")
+    if not touchPart then return false end
+    
+    -- Check money and withdraw from bank if needed
+    if self:GetMoney() < config.cost then
+        if self:ATMMoney() >= config.cost then
+            Sf:Teleport(config.atmCFrame.Position, c().AutoFarmATM)
+            task.wait(0.1)
+            local needed = config.cost - self:GetMoney()
+            if needed > 0 then
+                Net.get("transfer_funds", "bank", "hand", needed)
+                task.wait(0.1)
+            end
+        else
+            return false
+        end
+    end
+    
+    Sf:Teleport(touchPart.Position, c().AutoFarmATM)
+    task.wait(0.1)
+    
+    game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("Get"):InvokeServer(
+        658,
+        "open_crate",
+        vehicleCrate:WaitForChild("CrateOptions"):WaitForChild("Basic"),
+        "money"
+    )
+    task.wait(0.3)
+    return true
+end
+
+-- FIXED: Enhanced vehicle health tracking for both types
+function Sf:GetVehicleHealthByType(vehicleType)
+    vehicleType = vehicleType or Config.VechineType
+    
+    local items = PlayerGui:FindFirstChild("Items")
+    local holder = items and items:FindFirstChild("ItemsHolder")
+    local ScrollingFrame = holder and holder:FindFirstChild("ItemsScrollingFrame")
+    if not ScrollingFrame then return nil, nil, nil end
+    
+    local searchType = vehicleType == "Bike" and "bike" or "car"
+    
+    for _, v in ipairs(ScrollingFrame:GetChildren()) do
+        if v:GetAttribute('ItemType') == searchType then
+            local healthLabel = v:FindFirstChild("ItemHealth")
+            if healthLabel and healthLabel.Text then
+                local current, max = healthLabel.Text:match("(%d+)/(%d+)")
+                if current and max then
+                    return tonumber(current), tonumber(max), v.Name
+                end
+            end
+        end
+    end
+    
+    return nil, nil, nil
+end
+
+-- FIXED: Configuration check for car issues
+function Sf:ValidateCarConfig()
+    if Config.VechineType == "Car" then
+        -- Disable problematic features for cars
+        Config.WheelieEnabled = false
+        Config.FishingWheelieEnabled = false
+        
+        -- Adjust speeds appropriately
+        if Config.DrivingSpeed > 55 then
+            Config.DrivingSpeed = 55
+        end
+        
+        return true
+    end
+    return false
+end
+
+-- Call validation on config check
+Sf:ValidateCarConfig()
