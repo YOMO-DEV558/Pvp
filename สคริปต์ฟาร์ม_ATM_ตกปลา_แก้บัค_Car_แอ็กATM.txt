@@ -310,33 +310,8 @@ local Config = {
     FishingUnderground = true
 }
 local function c() return Config end
-local function getCurrentRootPart()
-    local char = Client.Character
-    if not char or not char.Parent then return nil end
-    local root = char:FindFirstChild("HumanoidRootPart")
-    return root and root:IsA("BasePart") and root or nil
-end
-local function distTo(target)
-    local root = getCurrentRootPart()
-    if not root or target == nil then return math.huge end
-    local position
-    if typeof(target) == "Vector3" then
-        position = target
-    elseif typeof(target) == "CFrame" then
-        position = target.Position
-    elseif typeof(target) == "Instance" then
-        if target:IsA("BasePart") then
-            position = target.Position
-        elseif target:IsA("Model") then
-            position = target.PrimaryPart and target.PrimaryPart.Position
-            if not position then
-                local part = target:FindFirstChildWhichIsA("BasePart", true)
-                position = part and part.Position
-            end
-        end
-    end
-    if not position then return math.huge end
-    return (position - root.Position).Magnitude
+local function distTo(v3)
+    return (v3 - RootPart.Position).Magnitude
 end
 local function JobNow() return Client:GetAttribute('Job') end
 local function CheckingIsProgess()
@@ -345,44 +320,25 @@ local function CheckingIsProgess()
     return false
 end
 local function GetAtmIsNotHackedJob(atm)
-    if not atm or not atm.Parent then return false end
-    -- Prefer explicit state attributes. Do not depend on alphabetical attribute order.
-    local explicit = {"IsHacked", "Hacked", "IsLocked", "Locked"}
-    for _, name in ipairs(explicit) do
-        local value = atm:GetAttribute(name)
-        if typeof(value) == "boolean" then
-            return value == false
-        end
+    if not atm then return false end
+    local keys = {}
+    for k in pairs(atm:GetAttributes()) do table.insert(keys, k) end
+    table.sort(keys)
+    if keys[3] then
+        return atm:GetAttribute(keys[3]) == false
     end
-    -- Compatibility fallback for game versions that expose an unnamed/legacy boolean.
-    local bools = {}
-    for name, value in pairs(atm:GetAttributes()) do
-        if typeof(value) == "boolean" then
-            bools[name] = value
-        end
-    end
-    local count, onlyValue = 0, nil
-    for _, value in pairs(bools) do
-        count += 1
-        onlyValue = value
-    end
-    return count == 1 and onlyValue == false
+    return false
 end
 local function GetNearThing(folder, path, condition)
     local closest, shortestDist = nil, math.huge
-    if not folder or typeof(path) ~= "string" then return nil end
+    if not folder then return nil end
     for _, obj in ipairs(folder:GetChildren()) do
-        if string.find(obj.Name, path, 1, true) then
-            local ok = true
-            if condition then
-                local success, result = pcall(condition, obj)
-                ok = success and result == true
-            end
-            if ok then
-                local dist = distTo(obj)
-                if dist < shortestDist then
-                    closest, shortestDist = obj, dist
-                end
+        if string.find(obj.Name, path) then
+            if not condition or condition(obj) then
+                local dist = math.huge
+                if obj:IsA("BasePart") then dist = distTo(obj.Position)
+                elseif obj:IsA('Model') and obj.PrimaryPart then dist = distTo(obj.PrimaryPart.Position) end
+                if dist < shortestDist then closest = obj shortestDist = dist end
             end
         end
     end
@@ -399,12 +355,8 @@ local function FindItem(name)
 end
 local function GetAllATM()
     local all = {}
-    local map = workspace:FindFirstChild("Map")
-    local props = map and map:FindFirstChild("Props")
-    local atms = props and props:FindFirstChild("ATMs")
-    if not atms then return all end
-    for _, atm in ipairs(atms:GetChildren()) do
-        if atm.Name == "ATM" and atm:IsA("Model") and atm.Parent then
+    for _, atm in pairs(workspace.Map.Props.ATMs:GetChildren()) do
+        if atm.Name == "ATM" and atm:IsA("Model") then
             table.insert(all, atm)
         end
     end
@@ -598,7 +550,7 @@ local function DrawPath(waypoints)
     end
 end
 function Sf:dist(Objective)
-    return distTo(Objective)
+    return (Objective.Position - RootPart.Position).Magnitude or 0
 end
 function Sf:GetInfo(w)
     local amount = 0
@@ -680,18 +632,10 @@ function Sf:ForceStop()
     end
 end
 function Sf:GetMoney()
-    local pg = PlayerGui or game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")
-    local top = pg and pg:FindFirstChild("TopRightHud")
-    local holder = top and top:FindFirstChild("Holder")
-    local frame = holder and holder:FindFirstChild("Frame")
-    local label = frame and frame:FindFirstChild("MoneyTextLabel")
-    if not label or not label:IsA("TextLabel") then return 0 end
-    local raw = tostring(label.Text or "")
+    local raw = game:GetService("Players").LocalPlayer.PlayerGui.TopRightHud.Holder.Frame.MoneyTextLabel.Text
     local stripped = raw:match("%$([%d,]+)")
-    if not stripped then
-        stripped = raw:match("([%d,]+)")
-    end
-    return tonumber((stripped or ""):gsub(",", "")) or 0
+    if not stripped then return 0 end
+    return tonumber((stripped:gsub(",", ""))) or 0
 end
 function Sf:Ac(...)
     return Net.send(...)
@@ -699,6 +643,64 @@ end
 function Sf:GetChipPrice(d)
     return ChipPrice[d] or nil
 end
+function CountFishingBait(baitName)
+    local count = 0
+    if not baitName or baitName == "" then return 0 end
+
+    local Items = PlayerGui:FindFirstChild("Items")
+    local Holding = Items
+        and Items:FindFirstChild("ItemsHolder")
+        and Items.ItemsHolder:FindFirstChild("ItemsScrollingFrame")
+
+    if not Holding then return 0 end
+
+    for _, v in ipairs(Holding:GetChildren()) do
+        if v.Name ~= "Folder" and v.Name ~= "UIGridLayout" and v.Name ~= "ItemTemplate" then
+            local itemName = v:FindFirstChild("ItemName")
+            if itemName and string.lower(itemName.Text or "") == string.lower(tostring(baitName)) then
+                count = count + 1
+            end
+        end
+    end
+
+    return count
+end
+
+local function BuyFishingBaitToTarget(baitName, targetAmount)
+    targetAmount = math.max(0, math.floor(tonumber(targetAmount) or 0))
+    if targetAmount <= 0 or not baitName then return 0 end
+
+    local current = CountFishingBait(baitName)
+    local needed = math.max(0, targetAmount - current)
+    if needed <= 0 then return 0 end
+
+    local hardwareShop = workspace:FindFirstChild("ShopZone_Hardware")
+    if not hardwareShop then return 0 end
+
+    local bought = 0
+    for _ = 1, needed do
+        if not Config.AutoFarmFishing then break end
+
+        -- Re-check every purchase so the configured amount is a hard cap,
+        -- rather than blindly adding Config.FishingBaitAmount each cycle.
+        local now = CountFishingBait(baitName)
+        if now >= targetAmount then break end
+
+        local ok = pcall(function()
+            Net.get("purchase_consumable", hardwareShop, baitName)
+        end)
+
+        if ok then
+            bought = bought + 1
+        else
+            break
+        end
+        task.wait(0.08)
+    end
+
+    return bought
+end
+
 function CountFish()
     local count = 0
     local Items = PlayerGui:FindFirstChild("Items")
@@ -768,19 +770,13 @@ function Sf:GetCarFromType(types)
     if types == "Bike" then
         for _, v in ipairs(ScrollingFrame:GetChildren()) do
             if v:GetAttribute("ItemType") == "bike" then
-                local itemName = v:FindFirstChild("ItemName")
-                if itemName and itemName:IsA("TextLabel") then
-                    return itemName.Text == "BMX" and "BMX" or itemName.Text
-                end
+                return v.ItemName.Text == "BMX" and "BMX" or v.ItemName.Text
             end
         end
     else
         for _, v in ipairs(ScrollingFrame:GetChildren()) do
             if v:GetAttribute('ItemType') == "car" then
-                local itemName = v:FindFirstChild("ItemName")
-                if itemName and itemName:IsA("TextLabel") then
-                    return itemName.Text
-                end
+                return v.ItemName.Text
             end
         end
     end
@@ -817,8 +813,7 @@ function Sf:GetVehicleHealth(vehicleName)
     if not ScrollingFrame then return nil end
     for _, v in ipairs(ScrollingFrame:GetChildren()) do
         if v:GetAttribute('ItemType') == "car" or v:GetAttribute('ItemType') == "bike" then
-            local itemName = v:FindFirstChild("ItemName")
-            if itemName and itemName:IsA("TextLabel") and itemName.Text == vehicleName then
+            if v.ItemName.Text == vehicleName then
                 local healthLabel = v:FindFirstChild("ItemHealth")
                 if healthLabel and healthLabel.Text then
                     local current, max = healthLabel.Text:match("(%d+)/(%d+)")
@@ -868,13 +863,19 @@ function Sf:GetChipFromType(types)
 end
 function Sf:FindClosestAvailableATM()
     local closestATM, shortestDist = nil, math.huge
-    for _, atm in ipairs(GetAllATM()) do
-        if GetAtmIsNotHackedJob(atm) then
-            local area = atm:FindFirstChild("Area")
-            local distanceTarget = area and area:IsA("BasePart") and area or atm
-            local d = self:dist(distanceTarget)
-            if d < shortestDist then
-                closestATM, shortestDist = atm, d
+    for _, atm in ipairs(workspace.Map.Props.ATMs:GetChildren()) do
+        if atm.Name == "ATM" then
+            local keys = {}
+            for k in pairs(atm:GetAttributes()) do
+                table.insert(keys, k)
+            end
+            table.sort(keys)
+            if keys[3] and atm:GetAttribute(keys[3]) == false then
+                local d = self:dist(atm.Area.CFrame)
+                if d < shortestDist then
+                    closestATM = atm
+                    shortestDist = d
+                end
             end
         end
     end
@@ -1020,8 +1021,7 @@ function Sf:Teleport(destination, value, t, speed)
             return
         end
         local dir = delta.Unit
-        local moveSpeed = math.max(1, tonumber(speed) or tonumber(Config.WalkingSpeed) or 16)
-        local startPos = RootPart.Position
+        local speed = speed or Config.WalkingSpeed
         local startTime = tick()
         local movedDist = 0
         while movedDist < dist and not c().StopWalking and value do
@@ -1032,8 +1032,8 @@ function Sf:Teleport(destination, value, t, speed)
                 break
             end
             local elapsedTime = tick() - startTime
-            movedDist = math.min(elapsedTime * moveSpeed, dist)
-            local newPos = startPos + dir * movedDist
+            movedDist = math.min(elapsedTime * speed, dist)
+            local newPos = RootPart.Position + dir * movedDist
             if Humanoid.Sit then Humanoid.Sit = false end
             RootPart:PivotTo(CFrame.new(newPos))
             Sf:Ac("set_sprinting_1", true)
@@ -1047,14 +1047,10 @@ function Sf:Teleport(destination, value, t, speed)
         local offsetY = (wp.Action == Enum.PathWaypointAction.Jump) and 10 or 4
         local targetPos = wp.Position + Vector3.new(0, offsetY, 0)
         local startPos = RootPart.Position
-        local delta = targetPos - startPos
-        local dist = delta.Magnitude
-        if dist < 0.05 then
-            continue
-        end
-        local dir = delta.Unit
+        local dir = (targetPos - startPos).Unit
+        local dist = (targetPos - startPos).Magnitude
         local movedDist = 0
-        local moveSpeed = math.max(1, tonumber(speed) or tonumber(Config.WalkingSpeed) or 16)
+        local speed = speed or Config.WalkingSpeed
         local startTime = tick()
         while movedDist < dist and not c().StopWalking and value do
             task.wait()
@@ -1064,7 +1060,7 @@ function Sf:Teleport(destination, value, t, speed)
                 break
             end
             local elapsedTime = tick() - startTime
-            movedDist = math.min(elapsedTime * moveSpeed, dist)
+            movedDist = math.min(elapsedTime * speed, dist)
             local newPos = startPos + dir * movedDist
             if Humanoid.Sit then Humanoid.Sit = false end
             RootPart:PivotTo(CFrame.new(newPos))
@@ -1696,7 +1692,7 @@ func['AutoFarmATM'] = function()
                                     table.insert(c().keys, k)
                                 end
                                 table.sort(c().keys)
-                                if not GetAtmIsNotHackedJob(closestATM) then
+                                if #c().keys >= 3 and not closestATM:GetAttribute(c().keys[3]) then
                                     local atmPos = closestATM.Area.Position
                                     local dist = Sf:dist(closestATM.Area)
                                     if dist > 15 then
@@ -1726,7 +1722,7 @@ func['AutoFarmATM'] = function()
                                         task.wait(0.05)
                                         RootPart.Anchored = false
                                     end
-                                    if not GetAtmIsNotHackedJob(closestATM) then
+                                    if #c().keys >= 3 and closestATM:GetAttribute(c().keys[3]) then
                                         Sf:PlaceVehicleOnGround()
                                         if vehicle and vehicle.PrimaryPart then
                                             Sf:EnterVehicle(vehicle, 6)
@@ -1786,7 +1782,7 @@ func['AutoFarmATM'] = function()
                                         -- ส่ง request หลายครั้ง เผื่อ UI/remote โหลดช้า
                                         for attempt = 1, 5 do
                                             if not c().AutoFarmATM then break end
-                                            if not GetAtmIsNotHackedJob(closestATM) then break end
+                                            if #c().keys >= 3 and closestATM:GetAttribute(c().keys[3]) then break end
 
                                             -- equip ซ้ำถ้าสถานะ UI ยังไม่ทันอัปเดต
                                             hackInfo = Sf:GetInfo(currentHackTool)
@@ -1797,8 +1793,8 @@ func['AutoFarmATM'] = function()
                                                 task.wait(0.12)
                                             end
 
-                                            local requestOk = pcall(function()
-                                                return Sf:Ac("request_begin_hacking_3", closestATM, currentHackTool)
+                                            pcall(function()
+                                                Sf:Ac("request_begin_hacking_3", closestATM, currentHackTool)
                                             end)
                                             local waitStart = tick()
                                             repeat
@@ -1806,11 +1802,6 @@ func['AutoFarmATM'] = function()
                                             until Sf:CheckingIsMinigame() or (tick() - waitStart) > 2 or not c().AutoFarmATM
 
                                             if Sf:CheckingIsMinigame() then
-                                                hackSent = true
-                                                break
-                                            end
-                                            -- ถ้า ATM ถูกแฮ็กไปแล้วระหว่าง request ให้ถือว่าสำเร็จ
-                                            if not GetAtmIsNotHackedJob(closestATM) then
                                                 hackSent = true
                                                 break
                                             end
@@ -1826,17 +1817,6 @@ func['AutoFarmATM'] = function()
                                             Sf:Ac("atm_win_3", closestATM)
                                         end)
                                         task.wait(0.5)
-                                        -- ตรวจผลจริงก่อนวนไป ATM ถัดไป
-                                        if GetAtmIsNotHackedJob(closestATM) then
-                                            -- minigame อาจยังไม่ทันปิด/remote อาจดีเลย์
-                                            for retryWin = 1, 3 do
-                                                if not c().AutoFarmATM or not GetAtmIsNotHackedJob(closestATM) then break end
-                                                task.wait(0.25)
-                                                pcall(function()
-                                                    Sf:Ac("atm_win_3", closestATM)
-                                                end)
-                                            end
-                                        end
                                         Sf:PlaceVehicleOnGround()
                                         task.wait(0.3)
                                     else
@@ -1935,7 +1915,12 @@ func['AutoFarmFishing'] = function()
             end
             if not hasBait then
                 for _, bait in ipairs(FishingBaits) do
-                    if bait.Name == selectedBaitName then neededMoney = neededMoney + (bait.Price * Config.FishingBaitAmount) break end
+                    if bait.Name == selectedBaitName then
+                        local currentBait = CountFishingBait(selectedBaitName)
+                        local baitNeeded = math.max(0, Config.FishingBaitAmount - currentBait)
+                        neededMoney = neededMoney + (bait.Price * baitNeeded)
+                        break
+                    end
                 end
             end
             local atmPos = Vector3.new(179.200882, 255.290543, -236.355896)
@@ -1956,13 +1941,8 @@ func['AutoFarmFishing'] = function()
                 end
                 task.wait(0.1)
             end
-            if not hasBait then
-                for i = 1, Config.FishingBaitAmount do
-                    local hardwareShop = workspace:FindFirstChild("ShopZone_Hardware")
-                    if not hardwareShop then break end
-                    Net.get("purchase_consumable", hardwareShop, selectedBaitName)
-                    task.wait(0.05)
-                end
+            if CountFishingBait(selectedBaitName) < Config.FishingBaitAmount then
+                BuyFishingBaitToTarget(selectedBaitName, Config.FishingBaitAmount)
             end
             task.wait(0.5)
             continue
@@ -2202,13 +2182,8 @@ func['AutoFarmFishing'] = function()
                 continue
             end
             local targetBait2 = selectedBaitName
-            for i = 1, Config.FishingBaitAmount do
-                local hardwareShop = workspace:FindFirstChild("ShopZone_Hardware")
-                if hardwareShop then
-                    pcall(function() Net.get("purchase_consumable", hardwareShop, targetBait2) end)
-                end
-                task.wait(0.08)
-            end
+            -- ซื้อเฉพาะจำนวนที่ขาด เพื่อไม่ให้เกินค่าที่ผู้ใช้กำหนด
+            BuyFishingBaitToTarget(targetBait2, Config.FishingBaitAmount)
             task.wait(0.5)
         else
             task.wait(0.5)
@@ -3457,6 +3432,7 @@ FishingTab:Slider({
 })
 FishingTab:Dropdown({
     Title = "🚗 Fishing Vehicle",
+    Desc = "เลือกให้ฟาร์มตกปลาใช้จักรยานหรือรถยนต์",
     Values = {"Bike", "Car"},
     Value = "Bike",
     Callback = function(Value)
