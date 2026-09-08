@@ -1796,34 +1796,121 @@ func['AutoFarmATM'] = function()
                                         end
                                     end
 
+                                    -- ATM minigame: request_begin_hacking_3 เพียงเปิดมินิเกม
+                                    -- ต้องส่ง minigame_click ครบ 3 ขั้นตาม target ที่แสดงใน SliderMinigame
+                                    local function GetHackMinigameData()
+                                        local gui = PlayerGui:FindFirstChild("SliderMinigame")
+                                        if not gui then return nil, nil end
+
+                                        local sessionId = nil
+                                        for _, obj in ipairs(gui:GetDescendants()) do
+                                            for _, value in pairs(obj:GetAttributes()) do
+                                                if type(value) == "string" and value:match("^%x+%-%x+%-%x+%-%x+%-%x+$") then
+                                                    sessionId = sessionId or value
+                                                end
+                                            end
+                                            if obj:IsA("StringValue") and obj.Value:match("^%x+%-%x+%-%x+%-%x+%-%x+$") then
+                                                sessionId = sessionId or obj.Value
+                                            end
+                                        end
+
+                                        -- หาแถบหลักก่อน แล้วหาแถบสีเขียวซึ่งเป็น target
+                                        local bar = nil
+                                        local candidates = {}
+                                        for _, obj in ipairs(gui:GetDescendants()) do
+                                            if obj:IsA("GuiObject") and obj.Visible then
+                                                local sx = obj.AbsoluteSize.X
+                                                local sy = obj.AbsoluteSize.Y
+                                                if sx > 100 and sx > sy * 3 then
+                                                    if not bar or sx > bar.AbsoluteSize.X then bar = obj end
+                                                end
+                                            end
+                                        end
+
+                                        if bar then
+                                            local bx = bar.AbsolutePosition.X
+                                            local bw = math.max(bar.AbsoluteSize.X, 1)
+                                            for _, obj in ipairs(gui:GetDescendants()) do
+                                                if obj:IsA("GuiObject") and obj.Visible and obj ~= bar then
+                                                    local ox = obj.AbsolutePosition.X
+                                                    local oy = obj.AbsolutePosition.Y
+                                                    local ow = obj.AbsoluteSize.X
+                                                    local oh = obj.AbsoluteSize.Y
+                                                    local centerX = ox + ow / 2
+                                                    local centerY = oy + oh / 2
+                                                    local barY = bar.AbsolutePosition.Y + bar.AbsoluteSize.Y / 2
+                                                    local insideX = centerX >= bx and centerX <= bx + bw
+                                                    local nearY = math.abs(centerY - barY) <= math.max(bar.AbsoluteSize.Y * 2, 40)
+                                                    local c = obj.BackgroundColor3
+                                                    local green = c and c.G > c.R * 1.25 and c.G > c.B * 1.05 and c.G > 0.25
+                                                    if insideX and nearY and green and ow >= 2 and ow <= bw * 0.5 then
+                                                        table.insert(candidates, {obj = obj, x = math.clamp((centerX - bx) / bw, 0, 1)})
+                                                    end
+                                                end
+                                            end
+                                        end
+
+                                        table.sort(candidates, function(a, b)
+                                            return a.obj.AbsoluteSize.X < b.obj.AbsoluteSize.X
+                                        end)
+                                        local target = candidates[1]
+                                        return sessionId, target and target.x or nil
+                                    end
+
                                     local hackCompleted = false
                                     if hackSent and c().AutoFarmATM then
-                                        -- สำคัญ: ห้ามขึ้นรถจนกว่า ATM จะถูกแอ็กสำเร็จจริง
-                                        -- บัคเดิมคือรอเพียง 1.2 วินาทีแล้วส่ง atm_win_3 จากนั้นขึ้นรถ
-                                        -- ขณะที่ SliderMinigame ยังทำงานอยู่ ทำให้ ATM ยังไม่เสร็จ
                                         local hackStart = tick()
                                         local hackTimeout = 20
-                                        while c().AutoFarmATM and (tick() - hackStart) < hackTimeout do
+                                        local lastSession = nil
+
+                                        -- ใน remote log ที่ให้มา format คือ:
+                                        -- minigame_click, UUID, step(1..3), position(0..1), serverTime, 1
+                                        -- ส่งทีละขั้นและรอ target เปลี่ยนก่อนส่งขั้นถัดไป
+                                        for step = 1, 3 do
+                                            if not c().AutoFarmATM or tick() - hackStart >= hackTimeout then break end
+
+                                            local sessionId, position
+                                            local targetWait = tick() + 4
+                                            while c().AutoFarmATM and Sf:CheckingIsMinigame() and tick() < targetWait do
+                                                sessionId, position = GetHackMinigameData()
+                                                if sessionId then lastSession = sessionId end
+                                                if lastSession and position ~= nil then break end
+                                                task.wait(0.03)
+                                            end
+
+                                            if lastSession and position ~= nil then
+                                                pcall(function()
+                                                    Sf:Ac("minigame_click", lastSession, step, position, workspace:GetServerTimeNow(), 1)
+                                                end)
+
+                                                -- ให้ UI/server เปลี่ยน target ก่อนคลิกขั้นถัดไป
+                                                local oldPosition = position
+                                                local changedWait = tick() + 3
+                                                repeat
+                                                    task.wait(0.05)
+                                                    local sid, newPosition = GetHackMinigameData()
+                                                    if sid then lastSession = sid end
+                                                    if newPosition ~= nil and math.abs(newPosition - oldPosition) > 0.01 then break end
+                                                until not c().AutoFarmATM or not Sf:CheckingIsMinigame() or tick() >= changedWait
+                                            else
+                                                break
+                                            end
+                                        end
+
+                                        -- รอ server เปลี่ยนสถานะ ATM สำเร็จจริง ห้ามขึ้นรถก่อน
+                                        while c().AutoFarmATM and tick() - hackStart < hackTimeout do
                                             if #c().keys >= 3 and closestATM:GetAttribute(c().keys[3]) then
                                                 hackCompleted = true
                                                 break
                                             end
-
-                                            -- ส่ง success ซ้ำเป็นช่วง ๆ ระหว่างที่ minigame เปิด
-                                            -- เพื่อรองรับเซิร์ฟเวอร์ที่ต้องการ remote มากกว่าหนึ่งครั้ง
-                                            pcall(function()
-                                                Sf:Ac("atm_win_3", closestATM)
-                                            end)
-
-                                            local minigameOpen = Sf:CheckingIsMinigame()
-                                            if not minigameOpen then
+                                            if not Sf:CheckingIsMinigame() then
                                                 task.wait(0.15)
                                                 if #c().keys >= 3 and closestATM:GetAttribute(c().keys[3]) then
                                                     hackCompleted = true
                                                     break
                                                 end
                                             end
-                                            task.wait(0.25)
+                                            task.wait(0.05)
                                         end
                                     end
 
