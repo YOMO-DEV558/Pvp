@@ -1796,28 +1796,60 @@ func['AutoFarmATM'] = function()
                                         end
                                     end
 
+                                    local hackCompleted = false
                                     if hackSent and c().AutoFarmATM then
-                                        -- ส่งผลสำเร็จหลัง minigame เปิดแล้ว
-                                        -- ไม่รอให้ UI ปิดเอง เพราะบางเซิร์ฟเวอร์จะค้างจนกว่าจะได้รับ atm_win_3
-                                        task.wait(1.2)
-                                        pcall(function()
-                                            Sf:Ac("atm_win_3", closestATM)
-                                        end)
-                                        task.wait(0.5)
+                                        -- สำคัญ: ห้ามขึ้นรถจนกว่า ATM จะถูกแอ็กสำเร็จจริง
+                                        -- บัคเดิมคือรอเพียง 1.2 วินาทีแล้วส่ง atm_win_3 จากนั้นขึ้นรถ
+                                        -- ขณะที่ SliderMinigame ยังทำงานอยู่ ทำให้ ATM ยังไม่เสร็จ
+                                        local hackStart = tick()
+                                        local hackTimeout = 20
+                                        while c().AutoFarmATM and (tick() - hackStart) < hackTimeout do
+                                            if #c().keys >= 3 and closestATM:GetAttribute(c().keys[3]) then
+                                                hackCompleted = true
+                                                break
+                                            end
+
+                                            -- ส่ง success ซ้ำเป็นช่วง ๆ ระหว่างที่ minigame เปิด
+                                            -- เพื่อรองรับเซิร์ฟเวอร์ที่ต้องการ remote มากกว่าหนึ่งครั้ง
+                                            pcall(function()
+                                                Sf:Ac("atm_win_3", closestATM)
+                                            end)
+
+                                            local minigameOpen = Sf:CheckingIsMinigame()
+                                            if not minigameOpen then
+                                                task.wait(0.15)
+                                                if #c().keys >= 3 and closestATM:GetAttribute(c().keys[3]) then
+                                                    hackCompleted = true
+                                                    break
+                                                end
+                                            end
+                                            task.wait(0.25)
+                                        end
+                                    end
+
+                                    -- ตรวจซ้ำจากสถานะ ATM จริงก่อนอนุญาตให้กลับขึ้นรถ
+                                    if c().AutoFarmATM and closestATM and #c().keys >= 3
+                                        and closestATM:GetAttribute(c().keys[3]) then
+                                        hackCompleted = true
+                                    end
+
+                                    if hackCompleted then
                                         Sf:PlaceVehicleOnGround()
                                         task.wait(0.3)
-                                    else
-                                        Sf:PlaceVehicleOnGround()
-                                    end
-                                    if c().AutoFarmATM then
-                                        if vehicle and vehicle.PrimaryPart then
+
+                                        if c().AutoFarmATM and vehicle and vehicle.PrimaryPart then
                                             Sf:EnterVehicle(vehicle, 6)
+                                            local wc = 0
+                                            while not Humanoid.Sit and wc < 30 and c().AutoFarmATM do
+                                                task.wait(0.05)
+                                                wc = wc + 1
+                                            end
                                         end
-                                        local wc = 0
-                                        while not Humanoid.Sit and wc < 15 and c().AutoFarmATM do
-                                            task.wait(0)
-                                            wc = wc + 1
-                                        end
+                                    else
+                                        -- Hack ไม่เสร็จ: อย่าขึ้นรถ ให้ค้างอยู่ที่ ATM แล้ววนลองใหม่
+                                        Sf:ForceStop()
+                                        Sf:PlaceVehicleOnGround()
+                                        task.wait(0.25)
                                     end
                                 end
                             end
